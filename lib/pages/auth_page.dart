@@ -1,7 +1,9 @@
 import 'dart:math' as math;
 import 'dart:ui';
 import 'package:flutter/material.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart'; 
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+// Ensure this matches your file structure
+import 'package:datatricksai/services/auth_service.dart';
 
 // ===========================================================================
 // DATATRICKS AI - AUTHENTICATION PAGE
@@ -15,7 +17,14 @@ class AuthPage extends StatefulWidget {
 }
 
 class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
+  final AuthService _authService = AuthService(); // Firebase Service
+  final _formKey = GlobalKey<FormState>(); // Key for Form Validation
+  
   bool _isLogin = true; // Toggle between Sign In and Sign Up
+  bool _isLoading = false; // Loading Spinner State
+  
+  // GLOBAL API ERROR STATE (For Firebase errors like "User not found")
+  String? _apiErrorMessage;
 
   // Form Controllers
   final _emailController = TextEditingController();
@@ -25,12 +34,74 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
   void _toggleAuthMode() {
     setState(() {
       _isLogin = !_isLogin;
+      _apiErrorMessage = null; // Clear global errors
+      _formKey.currentState?.reset(); // Clear field errors
     });
   }
 
-  // NAVIGATION ACTION
+  // NAVIGATION ACTION (Success)
   void _navigateToCareers() {
-    Navigator.pushNamed(context, '/careers');
+    Navigator.pushNamedAndRemoveUntil(context, '/careers', (route) => false);
+  }
+
+  // SUBMIT LOGIC
+  Future<void> _submitForm() async {
+    // 1. Validate Field Inputs (This triggers the Red Text below fields)
+    if (!_formKey.currentState!.validate()) {
+      return; // Stop if fields are invalid
+    }
+
+    // 2. Start Loading & Clear previous API errors
+    setState(() {
+      _isLoading = true;
+      _apiErrorMessage = null; 
+    });
+
+    try {
+      if (_isLogin) {
+        // --- LOG IN ---
+        await _authService.signIn(
+          email: _emailController.text,
+          password: _passController.text,
+        );
+      } else {
+        // --- SIGN UP ---
+        await _authService.signUp(
+          email: _emailController.text,
+          password: _passController.text,
+          name: _nameController.text,
+        );
+      }
+
+      // 3. Success -> Navigate
+      if (mounted) {
+        _navigateToCareers();
+      }
+    } catch (e) {
+      // 4. API Error -> Show in the top Alert Box
+      if (mounted) {
+        setState(() {
+          String msg = e.toString().replaceAll("Exception: ", "");
+          if (msg.contains("email-already-in-use")) msg = "This email is already registered.";
+          if (msg.contains("user-not-found")) msg = "Account not found.";
+          if (msg.contains("wrong-password")) msg = "Incorrect password.";
+          _apiErrorMessage = msg;
+        });
+      }
+    } finally {
+      // 5. Stop Loading
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passController.dispose();
+    _nameController.dispose();
+    super.dispose();
   }
 
   @override
@@ -39,7 +110,7 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
       backgroundColor: const Color(0xFF020408),
       body: Stack(
         children: [
-          // 1. REUSED BACKGROUND
+          // 1. BACKGROUND
           const _AuthBackgroundCanvas(),
 
           // 2. CENTERED GLASS CARD
@@ -76,114 +147,170 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
                             ),
                           ],
                         ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            // Animated Title
-                            AnimatedSwitcher(
-                              duration: const Duration(milliseconds: 300),
-                              child: Text(
-                                _isLogin ? "Welcome Back" : "Join the Hive",
-                                key: ValueKey(_isLogin),
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 32,
-                                  fontWeight: FontWeight.w900,
-                                  letterSpacing: -1,
+                        // WRAP CONTENT IN FORM FOR VALIDATION
+                        child: Form(
+                          key: _formKey,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              // Animated Title
+                              AnimatedSwitcher(
+                                duration: const Duration(milliseconds: 300),
+                                child: Text(
+                                  _isLogin ? "Welcome Back" : "Join the Hive",
+                                  key: ValueKey(_isLogin),
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 32,
+                                    fontWeight: FontWeight.w900,
+                                    letterSpacing: -1,
+                                  ),
+                                  textAlign: TextAlign.center,
                                 ),
+                              ),
+                              const SizedBox(height: 10),
+                              Text(
+                                _isLogin
+                                    ? "Enter your credentials to access the platform."
+                                    : "Start earning or training models today.",
                                 textAlign: TextAlign.center,
+                                style: const TextStyle(color: Colors.white54),
                               ),
-                            ),
-                            const SizedBox(height: 10),
-                            Text(
-                              _isLogin
-                                  ? "Enter your credentials to access the platform."
-                                  : "Start earning or training models today.",
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(color: Colors.white54),
-                            ),
-                            const SizedBox(height: 40),
-
-                            // SOCIAL BUTTON (LINKED TO CAREERS)
-                            _SocialButton(
-                              icon: FontAwesomeIcons.google, 
-                              label: "Continue with Google",
-                              onTap: _navigateToCareers, // Navigates to Careers
-                            ),
-
-                            const SizedBox(height: 30),
-                            const _DividerText(text: "or continue with email"),
-                            const SizedBox(height: 30),
-
-                            // FORM INPUTS
-                            if (!_isLogin) ...[
-                              _NeonStrikeInput(
-                                hint: "Full Name",
-                                icon: Icons.person_outline,
-                                controller: _nameController,
-                              ),
-                              const SizedBox(height: 20),
-                            ],
-
-                            _NeonStrikeInput(
-                              hint: "Email Address",
-                              icon: Icons.email_outlined,
-                              controller: _emailController,
-                            ),
-                            const SizedBox(height: 20),
-
-                            _NeonStrikeInput(
-                              hint: "Password",
-                              icon: Icons.lock_outline,
-                              isPassword: true,
-                              controller: _passController,
-                            ),
-
-                            if (_isLogin) ...[
-                              const SizedBox(height: 15),
-                              Align(
-                                alignment: Alignment.centerRight,
-                                child: TextButton(
-                                  onPressed: () {},
-                                  child: const Text(
-                                    "Forgot Password?",
-                                    style: TextStyle(color: Color(0xFF6366F1), fontWeight: FontWeight.w600),
+                              
+                              // --- API ERROR MESSAGE (For Firebase Failures) ---
+                              if (_apiErrorMessage != null) ...[
+                                const SizedBox(height: 20),
+                                Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFEF4444).withOpacity(0.15), // Red background
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: const Color(0xFFEF4444).withOpacity(0.5)),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      const Icon(Icons.error_outline, color: Color(0xFFEF4444), size: 20),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Text(
+                                          _apiErrorMessage!,
+                                          style: const TextStyle(color: Colors.white, fontSize: 13),
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
+                              ],
+                              // -----------------------------
+
+                              const SizedBox(height: 30),
+
+                              // SOCIAL BUTTON
+                              _SocialButton(
+                                icon: FontAwesomeIcons.google, 
+                                label: "Continue with Google",
+                                onTap: _navigateToCareers, 
                               ),
-                            ],
 
-                            const SizedBox(height: 30),
+                              const SizedBox(height: 30),
+                              const _DividerText(text: "or continue with email"),
+                              const SizedBox(height: 30),
 
-                            // ACTION BUTTON (LINKED TO CAREERS)
-                            _GradientButton(
-                              text: _isLogin ? "Sign In" : "Create Account",
-                              onPressed: _navigateToCareers, // Navigates to Careers
-                            ),
-
-                            const SizedBox(height: 30),
-
-                            // TOGGLE FOOTER
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Text(
-                                  _isLogin ? "Don't have an account?" : "Already have an account?",
-                                  style: const TextStyle(color: Colors.white60),
+                              // --- FORM INPUTS WITH VALIDATION ---
+                              
+                              // NAME
+                              if (!_isLogin) ...[
+                                _NeonStrikeInput(
+                                  hint: "Full Name",
+                                  icon: Icons.person_outline,
+                                  controller: _nameController,
+                                  validator: (val) {
+                                    if (val == null || val.trim().isEmpty) return "Name is required";
+                                    return null;
+                                  },
                                 ),
-                                TextButton(
-                                  onPressed: _toggleAuthMode,
-                                  child: Text(
-                                    _isLogin ? "Sign Up" : "Sign In",
-                                    style: const TextStyle(
-                                      color: Color(0xFFEC4899),
-                                      fontWeight: FontWeight.bold,
+                                const SizedBox(height: 20),
+                              ],
+
+                              // EMAIL
+                              _NeonStrikeInput(
+                                hint: "Email Address",
+                                icon: Icons.email_outlined,
+                                controller: _emailController,
+                                validator: (val) {
+                                  if (val == null || val.isEmpty) return "Email is required";
+                                  // Regex for valid email
+                                  final emailRegex = RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$');
+                                  if (!emailRegex.hasMatch(val)) {
+                                    return "Invalid email format";
+                                  }
+                                  return null;
+                                },
+                              ),
+                              const SizedBox(height: 20),
+
+                              // PASSWORD
+                              _NeonStrikeInput(
+                                hint: "Password",
+                                icon: Icons.lock_outline,
+                                isPassword: true,
+                                controller: _passController,
+                                validator: (val) {
+                                  if (val == null || val.isEmpty) return "Password is required";
+                                  if (val.length < 8) return "Must be at least 8 characters";
+                                  return null;
+                                },
+                              ),
+
+                              if (_isLogin) ...[
+                                const SizedBox(height: 15),
+                                Align(
+                                  alignment: Alignment.centerRight,
+                                  child: TextButton(
+                                    onPressed: () {
+                                      // Optional: Password Reset logic
+                                    },
+                                    child: const Text(
+                                      "Forgot Password?",
+                                      style: TextStyle(color: Color(0xFF6366F1), fontWeight: FontWeight.w600),
                                     ),
                                   ),
                                 ),
                               ],
-                            ),
-                          ],
+
+                              const SizedBox(height: 30),
+
+                              // ACTION BUTTON
+                              _GradientButton(
+                                text: _isLogin ? "Sign In" : "Create Account",
+                                isLoading: _isLoading,
+                                onPressed: _isLoading ? () {} : _submitForm, 
+                              ),
+
+                              const SizedBox(height: 30),
+
+                              // TOGGLE FOOTER
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Text(
+                                    _isLogin ? "Don't have an account?" : "Already have an account?",
+                                    style: const TextStyle(color: Colors.white60),
+                                  ),
+                                  TextButton(
+                                    onPressed: _toggleAuthMode,
+                                    child: Text(
+                                      _isLogin ? "Sign Up" : "Sign In",
+                                      style: const TextStyle(
+                                        color: Color(0xFFEC4899),
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
@@ -199,7 +326,7 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
 }
 
 // ===========================================================================
-// CORE COMPONENT: NEON STRIKE INPUT
+// CORE COMPONENT: NEON STRIKE INPUT (With VISIBLE Validation)
 // ===========================================================================
 
 class _NeonStrikeInput extends StatefulWidget {
@@ -207,12 +334,14 @@ class _NeonStrikeInput extends StatefulWidget {
   final IconData icon;
   final bool isPassword;
   final TextEditingController controller;
+  final String? Function(String?)? validator;
 
   const _NeonStrikeInput({
     required this.hint,
     required this.icon,
     required this.controller,
     this.isPassword = false,
+    this.validator,
   });
 
   @override
@@ -258,26 +387,41 @@ class _NeonStrikeInputState extends State<_NeonStrikeInput> with SingleTickerPro
       animation: _animController,
       builder: (context, child) {
         return CustomPaint(
+          // Only draw the neon border if focused
           painter: _hasFocus ? _StrikeBorderPainter(progress: _animController.value) : null,
           child: Container(
             decoration: BoxDecoration(
               color: const Color(0xFF020408),
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
+                // Use standard border when not focused
                 color: _hasFocus ? Colors.transparent : Colors.white10, 
                 width: 1.5
               ),
             ),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            child: TextField(
+            
+            // --- UPDATED TEXT FORM FIELD ---
+            child: TextFormField(
               focusNode: _focusNode,
               controller: widget.controller,
               obscureText: widget.isPassword,
+              validator: widget.validator, 
               style: const TextStyle(color: Colors.white),
+              cursorColor: const Color(0xFFEC4899),
               decoration: InputDecoration(
                 border: InputBorder.none,
                 hintText: widget.hint,
                 hintStyle: const TextStyle(color: Colors.white38),
+                
+                // --- THIS IS THE FIX ---
+                // We removed 'height: 0' and added a visible color
+                errorStyle: const TextStyle(
+                  color: Colors.redAccent, 
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500
+                ),
+                
                 icon: Icon(
                   widget.icon, 
                   color: _hasFocus ? const Color(0xFFEC4899) : Colors.white24
@@ -294,7 +438,6 @@ class _NeonStrikeInputState extends State<_NeonStrikeInput> with SingleTickerPro
   }
 }
 
-// THE PAINTER THAT CREATES THE ROTATING GRADIENT "STRIKE"
 class _StrikeBorderPainter extends CustomPainter {
   final double progress;
   _StrikeBorderPainter({required this.progress});
@@ -458,6 +601,9 @@ class _AuthHeader extends StatelessWidget {
               'assets/images/logo.png',
               height: 60,
               fit: BoxFit.contain,
+              errorBuilder: (context, error, stackTrace) {
+                return const Icon(FontAwesomeIcons.robot, size: 60, color: Colors.white);
+              },
             ),
           ],
         ),
@@ -479,12 +625,12 @@ class _AuthHeader extends StatelessWidget {
 class _SocialButton extends StatelessWidget {
   final IconData icon;
   final String label;
-  final VoidCallback onTap; // Updated to accept tap callback
+  final VoidCallback onTap; 
 
   const _SocialButton({
     required this.icon, 
     required this.label,
-    required this.onTap, // Required now
+    required this.onTap, 
   });
 
   @override
@@ -534,8 +680,13 @@ class _DividerText extends StatelessWidget {
 class _GradientButton extends StatelessWidget {
   final String text;
   final VoidCallback onPressed;
+  final bool isLoading;
 
-  const _GradientButton({required this.text, required this.onPressed});
+  const _GradientButton({
+    required this.text, 
+    required this.onPressed, 
+    this.isLoading = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -543,7 +694,7 @@ class _GradientButton extends StatelessWidget {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(12),
         gradient: const LinearGradient(
-          colors: [Color(0xFF6366F1), Color(0xFFEC4899)], // Indigo to Pink
+          colors: [Color(0xFF6366F1), Color(0xFFEC4899)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
@@ -564,18 +715,20 @@ class _GradientButton extends StatelessWidget {
           padding: const EdgeInsets.symmetric(vertical: 22),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
-        child: Text(
-          text,
-          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
-        ),
+        child: isLoading
+          ? const SizedBox(
+              height: 20, 
+              width: 20, 
+              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)
+            )
+          : Text(
+              text,
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+            ),
       ),
     );
   }
 }
-
-// ===========================================================================
-// BACKGROUND
-// ===========================================================================
 
 class _AuthBackgroundCanvas extends StatelessWidget {
   const _AuthBackgroundCanvas();

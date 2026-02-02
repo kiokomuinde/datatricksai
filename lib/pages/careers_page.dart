@@ -1,9 +1,11 @@
 import 'dart:convert';
-import 'dart:math' as math;
 import 'dart:ui';
+// ignore: avoid_web_libraries_in_flutter
+import 'dart:typed_data'; // REQUIRED: For handling file bytes across Web & Mobile
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:http/http.dart' as http; // FOR API CALLS
+import 'package:http/http.dart' as http; // FOR CLOUDINARY UPLOAD
+import 'package:cloud_firestore/cloud_firestore.dart'; // FOR DATA STORAGE
 
 // ===========================================================================
 // DATATRICKS AI - CAREERS & APPLICATION PAGE
@@ -18,7 +20,13 @@ class CareersPage extends StatefulWidget {
 
 class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin {
   final _scrollController = ScrollController();
+  final _formKey = GlobalKey<FormState>(); 
   
+  // --- CLOUDINARY CONFIGURATION (FILL THESE IN) ---
+  final String _cloudName = "dgdnli7vh"; 
+  final String _uploadPreset = "resumes_careers"; 
+  // ------------------------------------------------
+
   // Form Controllers
   final _firstNameController = TextEditingController();
   final _lastNameController = TextEditingController();
@@ -39,123 +47,170 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
 
   // File Upload State
   PlatformFile? _resumeFile;
-  String? _fileError;
+  Uint8List? _resumeBytes; 
+  String? _fileError; 
+
+  // Loading State
+  bool _isSubmitting = false;
 
   final List<String> _roles = [
-    "Senior Machine Learning Engineer",
-    "Data Annotation Specialist (Remote)",
-    "Frontend Developer (Flutter)",
-    "Backend Engineer (Go/Rust)",
-    "Product Manager",
-    "QA Automation Engineer"
+    "AI Data Annotator (Text)",
+    "AI Data Annotator (Image/Video)",
+    "Linguistics Specialist",
+    "Quality Assurance Lead",
+    "Python Developer (AI/ML)",
+    "Project Manager"
   ];
 
   final List<String> _sources = [
-    "LinkedIn", "Google Search", "Referral", "Twitter / X", "Glassdoor", "Other"
+    "LinkedIn",
+    "Indeed",
+    "Company Website",
+    "Referral",
+    "Other"
   ];
 
-  // STATIC US STATES (Guarantees the dropdown is always clickable)
-  final List<String> _states = [
-    "Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado", 
-    "Connecticut", "Delaware", "Florida", "Georgia", "Hawaii", "Idaho", 
-    "Illinois", "Indiana", "Iowa", "Kansas", "Kentucky", "Louisiana", 
-    "Maine", "Maryland", "Massachusetts", "Michigan", "Minnesota", 
-    "Mississippi", "Missouri", "Montana", "Nebraska", "Nevada", 
-    "New Hampshire", "New Jersey", "New Mexico", "New York", 
-    "North Carolina", "North Dakota", "Ohio", "Oklahoma", "Oregon", 
-    "Pennsylvania", "Rhode Island", "South Carolina", "South Dakota", 
-    "Tennessee", "Texas", "Utah", "Vermont", "Virginia", "Washington", 
-    "West Virginia", "Wisconsin", "Wyoming"
-  ];
+  final Map<String, List<String>> _usaStates = {
+    "California": ["Los Angeles", "San Francisco", "San Diego", "San Jose"],
+    "New York": ["New York City", "Buffalo", "Albany", "Rochester"],
+    "Texas": ["Houston", "Austin", "Dallas", "San Antonio"],
+    "Florida": ["Miami", "Orlando", "Tampa", "Jacksonville"],
+    "Washington": ["Seattle", "Spokane", "Tacoma", "Bellevue"],
+  };
 
-  // --- API: FETCH CITIES ---
-  Future<void> _fetchCities(String stateName) async {
+  // ---------------------------------------------------------------------------
+  // ACTIONS
+  // ---------------------------------------------------------------------------
+
+  void _goHome() {
+    Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
+  }
+
+  void _onStateChanged(String? newState) {
+    if (newState == null) return;
     setState(() {
-      _isLoadingCities = true;
-      _cities = ["Loading..."]; // Placeholder to keep dropdown active
+      _selectedState = newState;
       _selectedCity = null; 
+      _isLoadingCities = true;
     });
 
-    try {
-      // Fetching cities for the specific state
-      var url = Uri.parse("https://countriesnow.space/api/v0.1/countries/state/cities");
-      var response = await http.post(
-        url,
-        headers: {"Content-Type": "application/json"},
-        body: jsonEncode({
-          "country": "United States",
-          "state": stateName
-        })
-      );
-
-      if (response.statusCode == 200) {
-        var data = jsonDecode(response.body);
-        List<dynamic> citiesData = data['data'];
-        
-        if (mounted) {
-          setState(() {
-            _cities = citiesData.map((c) => c.toString()).toList();
-            _cities.sort();
-            _isLoadingCities = false;
-          });
-        }
-      } else {
-        throw Exception("Failed to load");
-      }
-    } catch (e) {
-      debugPrint("Error: $e");
+    Future.delayed(const Duration(milliseconds: 500), () {
       if (mounted) {
         setState(() {
-          _cities = ["Could not load cities"];
+          _cities = _usaStates[newState] ?? [];
           _isLoadingCities = false;
         });
       }
-    }
+    });
   }
 
-  // --- FILE PICKER ---
   Future<void> _pickResume() async {
     try {
-      setState(() => _fileError = null); 
+      setState(() => _fileError = null);
+
       FilePickerResult? result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
-        allowedExtensions: ['pdf', 'doc', 'docx'], 
+        allowedExtensions: ['pdf', 'doc', 'docx'],
+        withData: true, 
       );
 
       if (result != null) {
-        final file = result.files.first;
-        if (file.size > 4 * 1024 * 1024) { 
-          setState(() {
-            _fileError = "File is too large (Max 4MB).";
-            _resumeFile = null;
-          });
-          return;
-        }
-        setState(() => _resumeFile = file);
+        setState(() {
+          _resumeFile = result.files.first;
+          _resumeBytes = result.files.first.bytes;
+          _fileError = null; 
+        });
       }
     } catch (e) {
-      setState(() => _fileError = "Failed to pick file.");
+      debugPrint("Error picking file: $e");
     }
   }
 
-  void _submitApplication() {
-    if (_resumeFile == null) {
-       ScaffoldMessenger.of(context).showSnackBar(
-         const SnackBar(content: Text("Please upload your resume."), backgroundColor: Colors.red),
-       );
-       return;
+  // --- CLOUDINARY UPLOAD LOGIC ---
+  Future<String?> _uploadToCloudinary(Uint8List fileBytes, String fileName) async {
+    try {
+      var uri = Uri.parse("https://api.cloudinary.com/v1_1/$_cloudName/auto/upload");
+      var request = http.MultipartRequest("POST", uri);
+
+      request.fields['upload_preset'] = _uploadPreset;
+      request.files.add(http.MultipartFile.fromBytes('file', fileBytes, filename: fileName));
+
+      var response = await request.send();
+
+      if (response.statusCode == 200) {
+        var responseData = await response.stream.toBytes();
+        var responseString = String.fromCharCodes(responseData);
+        var jsonMap = jsonDecode(responseString);
+        return jsonMap['secure_url']; 
+      } else {
+        debugPrint("Cloudinary Error: ${response.statusCode}");
+        return null;
+      }
+    } catch (e) {
+      debugPrint("Upload Exception: $e");
+      return null;
     }
-    // Validation for dropdowns
-    if (_selectedState == null || _selectedCity == null) {
-       ScaffoldMessenger.of(context).showSnackBar(
-         const SnackBar(content: Text("Please select your location."), backgroundColor: Colors.orange),
-       );
-       return;
+  }
+
+  Future<void> _submitApplication() async {
+    setState(() => _fileError = null);
+    
+    // 1. Validation
+    bool isFormValid = _formKey.currentState!.validate();
+    bool isFileValid = true;
+    if (_resumeFile == null || _resumeBytes == null) {
+      setState(() => _fileError = "Resume is required (PDF or DOCX)");
+      isFileValid = false;
     }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-       const SnackBar(content: Text("Application Submitted Successfully!"), backgroundColor: Colors.green),
-    );
+    if (!isFormValid || !isFileValid) return;
+
+    // 2. Start Submission
+    setState(() => _isSubmitting = true);
+
+    try {
+      // A. Upload to Cloudinary
+      String? resumeUrl = await _uploadToCloudinary(_resumeBytes!, _resumeFile!.name);
+
+      if (resumeUrl == null) throw Exception("Resume upload failed. Please try again.");
+
+      // B. Save to Firestore
+      await FirebaseFirestore.instance.collection('applications').add({
+        'firstName': _firstNameController.text.trim(),
+        'lastName': _lastNameController.text.trim(),
+        'email': _emailController.text.trim(),
+        'phone': _phoneController.text.trim(),
+        'location': {
+          'state': _selectedState,
+          'city': _selectedCity,
+          'zip': _zipController.text.trim(),
+        },
+        'role': _selectedRole,
+        'linkedin': _linkedinController.text.trim(),
+        'source': _selectedSource,
+        'resumeUrl': resumeUrl,
+        'resumeName': _resumeFile!.name,
+        'appliedAt': FieldValue.serverTimestamp(),
+        'status': 'pending',
+      });
+
+      // 3. SUCCESS -> Navigate to Success Page
+      if (mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const ApplicationSuccessPage()),
+        );
+      }
+
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error: $e"), backgroundColor: Colors.redAccent),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
   }
 
   @override
@@ -164,160 +219,180 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
       backgroundColor: const Color(0xFF020408),
       body: Stack(
         children: [
-          // 1. BACKGROUND
           const _BackgroundCanvas(),
+          
+          Column(
+            children: [
+              _Navbar(onHomeTap: _goHome),
 
-          // 2. SCROLLABLE CONTENT
-          SingleChildScrollView(
-            controller: _scrollController,
-            padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 20),
-            child: Center(
-              child: Column(
-                children: [
-                  const _CareersHeader(),
-                  const SizedBox(height: 40),
-
-                  // MAIN FORM CARD
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(24),
-                    child: BackdropFilter(
-                      filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-                      child: Container(
-                        constraints: const BoxConstraints(maxWidth: 800),
-                        padding: const EdgeInsets.all(40),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF0F172A).withOpacity(0.6),
-                          borderRadius: BorderRadius.circular(24),
-                          border: Border.all(color: Colors.white.withOpacity(0.1), width: 1),
-                          boxShadow: [
-                            BoxShadow(color: Colors.black.withOpacity(0.5), blurRadius: 30, offset: const Offset(0, 10)),
-                          ],
-                        ),
+              Expanded(
+                child: SingleChildScrollView(
+                  controller: _scrollController,
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 40),
+                  child: Center(
+                    child: Container(
+                      constraints: const BoxConstraints(maxWidth: 800),
+                      child: Form(
+                        key: _formKey,
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text("Application Form", style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
+                            const Text("Join the Hive", style: TextStyle(fontSize: 42, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: -1)),
                             const SizedBox(height: 10),
-                            const Text("Please fill out the details below. Our recruitment team reviews applications on a rolling basis.", style: TextStyle(color: Colors.white54, height: 1.5)),
+                            const Text("Help us build the next generation of AI models.", style: TextStyle(fontSize: 18, color: Colors.white54, height: 1.5)),
                             const SizedBox(height: 40),
 
-                            // PERSONAL INFO
-                            const _SectionLabel(label: "Personal Information"),
+                            _SectionHeader("Personal Information"),
                             const SizedBox(height: 20),
-                            _ResponsiveRow(children: [
-                               _NeonStrikeInput(hint: "First Name", icon: Icons.person, controller: _firstNameController),
-                               _NeonStrikeInput(hint: "Last Name", icon: Icons.person_outline, controller: _lastNameController),
-                            ]),
-                            const SizedBox(height: 20),
-                            _ResponsiveRow(children: [
-                               _NeonStrikeInput(hint: "Email Address", icon: Icons.email_outlined, controller: _emailController),
-                               _NeonStrikeInput(hint: "Phone Number", icon: Icons.phone_outlined, controller: _phoneController),
-                            ]),
-
-                            const SizedBox(height: 40),
-
-                            // LOCATION (FIXED)
-                            const _SectionLabel(label: "Location"),
-                            const SizedBox(height: 20),
-                            _ResponsiveRow(children: [
-                               // STATE DROPDOWN (Static List = Always Clickable)
-                               _NeonDropdown(
-                                 hint: "Select State",
-                                 items: _states,
-                                 value: _selectedState,
-                                 onChanged: (val) {
-                                   if (val != null) {
-                                     setState(() => _selectedState = val);
-                                     _fetchCities(val); // Triggers API for cities
-                                   }
-                                 },
-                               ),
-                               // CITY DROPDOWN (Dynamic API)
-                               _NeonDropdown(
-                                 hint: _selectedState == null 
-                                     ? "Select State First" 
-                                     : (_isLoadingCities ? "Fetching Cities..." : "Select City"),
-                                 items: _cities,
-                                 value: _cities.contains(_selectedCity) ? _selectedCity : null,
-                                 // Disable selection if loading or no state selected
-                                 onChanged: (_cities.isEmpty || _cities[0] == "Loading...") 
-                                    ? null 
-                                    : (val) => setState(() => _selectedCity = val),
-                               ),
-                            ]),
-                            const SizedBox(height: 20),
-                            Row(
-                              children: [
-                                Expanded(child: _NeonStrikeInput(hint: "Zip / Postal Code", icon: Icons.numbers, controller: _zipController)),
+                            Row(children: [
+                                Expanded(child: _NeonInput(label: "First Name", controller: _firstNameController)),
                                 const SizedBox(width: 20),
-                                const Expanded(child: SizedBox()), 
-                              ],
-                            ),
-
-                            const SizedBox(height: 40),
-
-                            // POSITION DETAILS
-                            const _SectionLabel(label: "Position & Details"),
-                            const SizedBox(height: 20),
-                            _ResponsiveRow(children: [
-                              _NeonDropdown(
-                                hint: "Select Position", 
-                                items: _roles, 
-                                value: _selectedRole,
-                                onChanged: (val) => setState(() => _selectedRole = val),
-                              ),
-                              _NeonDropdown(
-                                hint: "Where did you find us?", 
-                                items: _sources, 
-                                value: _selectedSource,
-                                onChanged: (val) => setState(() => _selectedSource = val),
-                              ),
+                                Expanded(child: _NeonInput(label: "Last Name", controller: _lastNameController)),
                             ]),
                             const SizedBox(height: 20),
-                            _NeonStrikeInput(hint: "LinkedIn Profile URL", icon: Icons.link, controller: _linkedinController),
-
+                            Row(children: [
+                                Expanded(child: _NeonInput(label: "Email", icon: Icons.email, controller: _emailController, isEmail: true)),
+                                const SizedBox(width: 20),
+                                Expanded(child: _NeonInput(label: "Phone", icon: Icons.phone, controller: _phoneController, isPhone: true)),
+                            ]),
                             const SizedBox(height: 40),
 
-                            // RESUME UPLOAD
-                            const _SectionLabel(label: "Resume / CV"),
+                            _SectionHeader("Location"),
                             const SizedBox(height: 20),
-                            _FileUploadZone(
+                            Row(children: [
+                                Expanded(child: _NeonDropdown(label: "State / Region", value: _selectedState, items: _usaStates.keys.toList(), onChanged: _onStateChanged)),
+                                const SizedBox(width: 20),
+                                Expanded(child: _isLoadingCities ? const Center(child: CircularProgressIndicator()) : _NeonDropdown(label: "City", value: _selectedCity, items: _cities, onChanged: (val) => setState(() => _selectedCity = val))),
+                                const SizedBox(width: 20),
+                                Expanded(child: _NeonInput(label: "Zip Code", controller: _zipController, isZip: true)),
+                            ]),
+                            const SizedBox(height: 40),
+
+                            _SectionHeader("Role & Experience"),
+                            const SizedBox(height: 20),
+                            _NeonDropdown(label: "Position Applying For", value: _selectedRole, items: _roles, onChanged: (val) => setState(() => _selectedRole = val)),
+                            const SizedBox(height: 20),
+                            _NeonInput(label: "LinkedIn Profile URL (Optional)", icon: Icons.link, controller: _linkedinController, isOptional: true),
+                            const SizedBox(height: 20),
+                            _NeonDropdown(label: "How did you hear about us? (Optional)", value: _selectedSource, items: _sources, onChanged: (val) => setState(() => _selectedSource = val), isOptional: true),
+                            const SizedBox(height: 40),
+
+                            _SectionHeader("Resume / CV"),
+                            const SizedBox(height: 15),
+                            
+                            // FILE UPLOAD WIDGET
+                            InkWell(
                               onTap: _pickResume,
-                              file: _resumeFile,
-                              errorText: _fileError,
-                            ),
-
-                            const SizedBox(height: 50),
-
-                            // SUBMIT
-                            SizedBox(
-                              width: double.infinity,
-                              child: _GradientSubmitButton(
-                                text: "Submit Application", 
-                                onPressed: _submitApplication,
+                              borderRadius: BorderRadius.circular(12),
+                              child: Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.symmetric(vertical: 30),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.02),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: _fileError != null ? Colors.redAccent : Colors.white24, 
+                                    style: BorderStyle.solid,
+                                    width: _fileError != null ? 1.5 : 1.0,
+                                  ),
+                                ),
+                                child: Column(children: [
+                                    Icon(
+                                      _resumeFile == null ? Icons.cloud_upload_outlined : Icons.check_circle, 
+                                      size: 40, 
+                                      color: _fileError != null ? Colors.redAccent : (_resumeFile == null ? Colors.white54 : const Color(0xFF6366F1))
+                                    ),
+                                    const SizedBox(height: 10),
+                                    Text(
+                                      _resumeFile == null ? "Click to upload Resume (PDF, DOCX)" : _resumeFile!.name,
+                                      style: TextStyle(
+                                        color: _fileError != null ? Colors.redAccent : (_resumeFile == null ? Colors.white54 : Colors.white),
+                                        fontWeight: _resumeFile == null ? FontWeight.normal : FontWeight.bold
+                                      ),
+                                    ),
+                                    if (_fileError != null) ...[
+                                      const SizedBox(height: 10),
+                                      Text(
+                                        _fileError!, 
+                                        style: const TextStyle(color: Colors.redAccent, fontSize: 13, fontWeight: FontWeight.bold)
+                                      )
+                                    ]
+                                ]),
                               ),
                             ),
+                            
+                            const SizedBox(height: 50),
+                            SizedBox(width: double.infinity, child: _GradientButton(text: _isSubmitting ? "Uploading..." : "Submit Application", isLoading: _isSubmitting, onPressed: _isSubmitting ? () {} : _submitApplication)),
+                            const SizedBox(height: 50),
                           ],
                         ),
                       ),
                     ),
                   ),
-                  const SizedBox(height: 40),
-                  const Text("© 2026 DataTricks AI. All rights reserved.", style: TextStyle(color: Colors.white24)),
-                ],
+                ),
               ),
-            ),
+            ],
           ),
-          
-          // BACK BUTTON
-          Positioned(
-            top: 40, left: 20,
-            child: IconButton(
-              onPressed: () => Navigator.pop(context),
-              icon: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(color: Colors.white.withOpacity(0.1), borderRadius: BorderRadius.circular(10)),
-                child: const Icon(Icons.arrow_back, color: Colors.white),
+        ],
+      ),
+    );
+  }
+
+  Widget _SectionHeader(String title) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(title, style: const TextStyle(color: Color(0xFF6366F1), fontWeight: FontWeight.bold, letterSpacing: 1.2)), const SizedBox(height: 5), Divider(color: Colors.white.withOpacity(0.1))]);
+  }
+}
+
+// ===========================================================================
+// APPLICATION SUCCESS PAGE
+// ===========================================================================
+
+class ApplicationSuccessPage extends StatelessWidget {
+  const ApplicationSuccessPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF020408),
+      body: Stack(
+        children: [
+          const _BackgroundCanvas(),
+          Center(
+            child: Container(
+              padding: const EdgeInsets.all(40),
+              constraints: const BoxConstraints(maxWidth: 500),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0F172A).withOpacity(0.8),
+                borderRadius: BorderRadius.circular(30),
+                border: Border.all(color: Colors.white.withOpacity(0.1)),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.rocket_launch_rounded, size: 80, color: Color(0xFF6366F1)),
+                  const SizedBox(height: 30),
+                  const Text(
+                    "Application Sent!",
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Colors.white),
+                  ),
+                  const SizedBox(height: 15),
+                  const Text(
+                    "Thank you for reaching out to DataTricks AI. We have received your details and resume. Our recruitment team will review your profile and contact you if you are a good match.",
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 16, color: Colors.white70, height: 1.5),
+                  ),
+                  const SizedBox(height: 40),
+                  SizedBox(
+                    width: double.infinity,
+                    child: _GradientButton(
+                      text: "Back to Home", 
+                      onPressed: () {
+                         Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
+                      }
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -327,225 +402,70 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
   }
 }
 
-// ===========================================================================
-// COMPONENT: FILE UPLOAD ZONE
-// ===========================================================================
+// ---------------------------------------------------------------------------
+// SUB-COMPONENTS
+// ---------------------------------------------------------------------------
 
-class _FileUploadZone extends StatefulWidget {
-  final VoidCallback onTap;
-  final PlatformFile? file;
-  final String? errorText;
-
-  const _FileUploadZone({required this.onTap, this.file, this.errorText});
-
-  @override
-  State<_FileUploadZone> createState() => _FileUploadZoneState();
-}
-
-class _FileUploadZoneState extends State<_FileUploadZone> {
-  bool isHovering = false;
+class _Navbar extends StatelessWidget {
+  final VoidCallback onHomeTap;
+  const _Navbar({required this.onHomeTap});
   @override
   Widget build(BuildContext context) {
-    bool hasFile = widget.file != null;
-    bool hasError = widget.errorText != null;
-
-    Color borderColor = hasError ? Colors.redAccent : hasFile ? const Color(0xFF10B981) : (isHovering ? const Color(0xFF6366F1) : Colors.white24);
-    Color bgColor = hasError ? Colors.red.withOpacity(0.05) : hasFile ? const Color(0xFF10B981).withOpacity(0.05) : (isHovering ? const Color(0xFF6366F1).withOpacity(0.05) : Colors.transparent);
-
-    return MouseRegion(
-      onEnter: (_) => setState(() => isHovering = true),
-      onExit: (_) => setState(() => isHovering = false),
-      child: GestureDetector(
-        onTap: widget.onTap,
-        child: CustomPaint(
-          painter: _DashedRectPainter(color: borderColor),
-          child: Container(
-            height: 150,
-            width: double.infinity,
-            decoration: BoxDecoration(color: bgColor, borderRadius: BorderRadius.circular(16)),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(hasError ? Icons.error_outline : (hasFile ? Icons.check_circle_outline : Icons.cloud_upload_outlined), size: 40, color: hasError ? Colors.redAccent : (hasFile ? const Color(0xFF10B981) : (isHovering ? const Color(0xFF6366F1) : Colors.white54))),
-                const SizedBox(height: 15),
-                if (hasFile) ...[
-                  Text(widget.file!.name, style: const TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold, fontSize: 16)),
-                  const SizedBox(height: 5),
-                  Text("${(widget.file!.size / 1024).toStringAsFixed(1)} KB", style: const TextStyle(color: Colors.white38, fontSize: 12)),
-                ] else if (hasError) ...[
-                  Text(widget.errorText!, style: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 5),
-                  const Text("Try again with PDF/DOCX under 4MB", style: TextStyle(color: Colors.white38, fontSize: 12)),
-                ] else ...[
-                  Text("Click to upload or drag and drop", style: TextStyle(color: isHovering ? Colors.white : Colors.white70, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 5),
-                  const Text("PDF, DOC, DOCX (Max 4MB)", style: TextStyle(color: Colors.white38, fontSize: 12)),
-                ]
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
+    return ClipRRect(child: BackdropFilter(filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10), child: Container(height: 80, padding: const EdgeInsets.symmetric(horizontal: 40), decoration: BoxDecoration(border: Border(bottom: BorderSide(color: Colors.white.withOpacity(0.05))), color: Colors.black.withOpacity(0.2)), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [InkWell(onTap: onHomeTap, child: Row(children: [Image.asset('assets/images/logo.png', height: 40, errorBuilder: (c,e,s) => const Icon(Icons.rocket, color: Colors.white)), const SizedBox(width: 15), const Text("DATATRICKS AI", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20))])), TextButton.icon(onPressed: onHomeTap, icon: const Icon(Icons.arrow_back, color: Colors.white54, size: 18), label: const Text("Return Home", style: TextStyle(color: Colors.white54)))]))));
   }
 }
 
-// ===========================================================================
-// UTILS & PAINTERS
-// ===========================================================================
-
-class _DashedRectPainter extends CustomPainter {
-  final Color color;
-  _DashedRectPainter({required this.color});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final Paint paint = Paint()..color = color..strokeWidth = 2.0..style = PaintingStyle.stroke;
-    final RRect rrect = RRect.fromRectAndRadius(Rect.fromLTWH(0, 0, size.width, size.height), const Radius.circular(16));
-    final Path path = Path()..addRRect(rrect);
-    final Path dashPath = Path();
-    double distance = 0.0;
-    for (final PathMetric metric in path.computeMetrics()) {
-      while (distance < metric.length) {
-        dashPath.addPath(metric.extractPath(distance, distance + 10), Offset.zero);
-        distance += 15;
-      }
-    }
-    canvas.drawPath(dashPath, paint);
-  }
-  @override
-  bool shouldRepaint(_DashedRectPainter oldDelegate) => oldDelegate.color != color;
-}
-
-// DROPDOWN COMPONENT (Updated to handle empty/null)
-class _NeonDropdown extends StatelessWidget {
-  final String hint;
-  final List<String> items;
-  final String? value;
-  final ValueChanged<String?>? onChanged; // Nullable for disabled state
-
-  const _NeonDropdown({required this.hint, required this.items, required this.value, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 5),
-      decoration: BoxDecoration(color: const Color(0xFF020408), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.white10, width: 1.5)),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<String>(
-          value: value,
-          hint: Text(hint, style: const TextStyle(color: Colors.white38)),
-          dropdownColor: const Color(0xFF1E293B),
-          icon: const Icon(Icons.arrow_drop_down, color: Colors.white54),
-          isExpanded: true,
-          style: const TextStyle(color: Colors.white),
-          // If items list is valid, map it. If it's empty, DropdownButton disables itself, but we handle visual hints via 'hint'.
-          items: items.isEmpty ? [] : items.map((String value) {
-            return DropdownMenuItem<String>(value: value, child: Text(value));
-          }).toList(),
-          onChanged: onChanged,
-        ),
-      ),
-    );
-  }
-}
-
-class _NeonStrikeInput extends StatefulWidget {
-  final String hint;
-  final IconData icon;
-  final TextEditingController controller;
-  const _NeonStrikeInput({required this.hint, required this.icon, required this.controller});
-  @override
-  State<_NeonStrikeInput> createState() => _NeonStrikeInputState();
-}
-
-class _NeonStrikeInputState extends State<_NeonStrikeInput> with SingleTickerProviderStateMixin {
-  final FocusNode _focusNode = FocusNode();
-  late AnimationController _animController;
-  bool _hasFocus = false;
-  @override
-  void initState() {
-    super.initState();
-    _animController = AnimationController(vsync: this, duration: const Duration(seconds: 2));
-    _focusNode.addListener(() {
-      setState(() {
-        _hasFocus = _focusNode.hasFocus;
-        if (_hasFocus) _animController.repeat(); else { _animController.stop(); _animController.reset(); }
-      });
-    });
-  }
-  @override
-  void dispose() { _focusNode.dispose(); _animController.dispose(); super.dispose(); }
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _animController,
-      builder: (context, child) {
-        return CustomPaint(
-          painter: _hasFocus ? _StrikeBorderPainter(progress: _animController.value) : null,
-          child: Container(
-            decoration: BoxDecoration(color: const Color(0xFF020408), borderRadius: BorderRadius.circular(12), border: Border.all(color: _hasFocus ? Colors.transparent : Colors.white10, width: 1.5)),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            child: TextField(
-              focusNode: _focusNode,
-              controller: widget.controller,
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(border: InputBorder.none, hintText: widget.hint, hintStyle: const TextStyle(color: Colors.white38), icon: Icon(widget.icon, color: _hasFocus ? const Color(0xFFEC4899) : Colors.white24)),
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _StrikeBorderPainter extends CustomPainter {
-  final double progress;
-  _StrikeBorderPainter({required this.progress});
-  @override
-  void paint(Canvas canvas, Size size) {
-    final rect = Rect.fromLTWH(0, 0, size.width, size.height);
-    final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(12));
-    final paint = Paint()..style = PaintingStyle.stroke..strokeWidth = 2.0;
-    paint.shader = SweepGradient(startAngle: 0.0, endAngle: math.pi * 2, colors: const [Color(0xFF6366F1), Color(0xFFEC4899), Colors.transparent, Colors.transparent, Color(0xFF6366F1)], stops: const [0.0, 0.25, 0.5, 0.9, 1.0], transform: GradientRotation(progress * math.pi * 2)).createShader(rect);
-    canvas.drawRRect(rrect, paint);
-  }
-  @override
-  bool shouldRepaint(covariant _StrikeBorderPainter oldDelegate) => oldDelegate.progress != progress;
-}
-
-// LAYOUT UTILS
-class _ResponsiveRow extends StatelessWidget {
-  final List<Widget> children;
-  const _ResponsiveRow({required this.children});
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(builder: (context, constraints) {
-      if (constraints.maxWidth > 600) return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [Expanded(child: children[0]), const SizedBox(width: 20), Expanded(child: children[1])]);
-      else return Column(children: [children[0], const SizedBox(height: 20), children[1]]);
-    });
-  }
-}
-
-class _SectionLabel extends StatelessWidget {
+class _NeonInput extends StatelessWidget {
   final String label;
-  const _SectionLabel({required this.label});
+  final IconData? icon;
+  final TextEditingController controller;
+  final bool isEmail, isPhone, isZip, isOptional;
+  const _NeonInput({required this.label, this.icon, required this.controller, this.isEmail = false, this.isPhone = false, this.isZip = false, this.isOptional = false});
   @override
-  Widget build(BuildContext context) => Row(children: [Container(width: 4, height: 20, color: const Color(0xFFEC4899)), const SizedBox(width: 10), Text(label.toUpperCase(), style: const TextStyle(color: Colors.white70, fontSize: 12, letterSpacing: 1.5, fontWeight: FontWeight.bold))]);
+  Widget build(BuildContext context) {
+    return TextFormField(
+      controller: controller,
+      style: const TextStyle(color: Colors.white),
+      keyboardType: isEmail ? TextInputType.emailAddress : (isPhone || isZip ? TextInputType.number : TextInputType.text),
+      validator: (val) {
+        if (isOptional && (val == null || val.trim().isEmpty)) return null;
+        if (val == null || val.trim().isEmpty) return "$label is required";
+        if (isEmail && !RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(val)) return "Invalid email";
+        if (isPhone && !RegExp(r'^\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}$').hasMatch(val)) return "Invalid US phone";
+        if (isZip && !RegExp(r'^\d{5}(-\d{4})?$').hasMatch(val)) return "Invalid Zip";
+        return null;
+      },
+      decoration: InputDecoration(labelText: label, labelStyle: const TextStyle(color: Colors.white38), filled: true, fillColor: Colors.white.withOpacity(0.05), prefixIcon: icon != null ? Icon(icon, color: Colors.white24, size: 18) : null, border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none), focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF6366F1))), errorStyle: const TextStyle(color: Colors.redAccent, height: 1)),
+    );
+  }
 }
 
-class _CareersHeader extends StatelessWidget {
-  const _CareersHeader();
+class _NeonDropdown extends StatelessWidget {
+  final String label;
+  final String? value;
+  final List<String> items;
+  final Function(String?) onChanged;
+  final bool isOptional;
+  const _NeonDropdown({required this.label, required this.value, required this.items, required this.onChanged, this.isOptional = false});
   @override
-  Widget build(BuildContext context) => Column(children: [Container(padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: const Color(0xFF6366F1).withOpacity(0.1), shape: BoxShape.circle), child: const Icon(Icons.rocket_launch, color: Color(0xFF6366F1), size: 40)), const SizedBox(height: 20), const Text("Join the Hive", style: TextStyle(color: Colors.white, fontSize: 40, fontWeight: FontWeight.w900, letterSpacing: -1)), const SizedBox(height: 10), const Text("Help us build the intelligence layer of the future.", style: TextStyle(color: Colors.white54, fontSize: 16))]);
+  Widget build(BuildContext context) {
+    return DropdownButtonFormField<String>(
+      value: value, items: items.map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(), onChanged: onChanged, dropdownColor: const Color(0xFF1E293B), style: const TextStyle(color: Colors.white),
+      validator: (val) { if (isOptional) return null; return val == null ? "Please select an option" : null; },
+      decoration: InputDecoration(labelText: label, labelStyle: const TextStyle(color: Colors.white38), filled: true, fillColor: Colors.white.withOpacity(0.05), border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none), focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF6366F1))), errorStyle: const TextStyle(color: Colors.redAccent)),
+    );
+  }
 }
 
-class _GradientSubmitButton extends StatelessWidget {
+class _GradientButton extends StatelessWidget {
   final String text;
   final VoidCallback onPressed;
-  const _GradientSubmitButton({required this.text, required this.onPressed});
+  final bool isLoading;
+  const _GradientButton({required this.text, required this.onPressed, this.isLoading = false});
   @override
-  Widget build(BuildContext context) => Container(decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), gradient: const LinearGradient(colors: [Color(0xFF6366F1), Color(0xFFEC4899)], begin: Alignment.topLeft, end: Alignment.bottomRight), boxShadow: const [BoxShadow(color: Color(0xFF6366F1), blurRadius: 20, offset: Offset(0, 5), spreadRadius: -5)]), child: ElevatedButton(onPressed: onPressed, style: ElevatedButton.styleFrom(backgroundColor: Colors.transparent, shadowColor: Colors.transparent, padding: const EdgeInsets.symmetric(vertical: 22), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))), child: Text(text, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white))));
+  Widget build(BuildContext context) {
+    return Container(decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), gradient: const LinearGradient(colors: [Color(0xFF6366F1), Color(0xFFEC4899)], begin: Alignment.topLeft, end: Alignment.bottomRight), boxShadow: const [BoxShadow(color: Color(0xFF6366F1), blurRadius: 20, offset: Offset(0, 5), spreadRadius: -5)]), child: ElevatedButton(onPressed: onPressed, style: ElevatedButton.styleFrom(backgroundColor: Colors.transparent, shadowColor: Colors.transparent, padding: const EdgeInsets.symmetric(vertical: 22), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))), child: isLoading ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : Text(text, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white))));
+  }
 }
 
 class _BackgroundCanvas extends StatelessWidget {
@@ -553,6 +473,7 @@ class _BackgroundCanvas extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Positioned.fill(child: CustomPaint(painter: _BgPainter()));
 }
+
 class _BgPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {

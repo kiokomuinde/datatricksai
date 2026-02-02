@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "262564490278",
+    "project_id": "datatricksai",
+    "storage_bucket": "datatricksai.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:262564490278:android:f30ad817d8a9c2eecccae7",
+        "android_client_info": {
+          "package_name": "com.example.datatricksai"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB9YFakpK-2mbJr1nhlbCARJB2k4Ld6B8w"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
