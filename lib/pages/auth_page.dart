@@ -352,6 +352,9 @@ class _NeonStrikeInputState extends State<_NeonStrikeInput> with SingleTickerPro
   final FocusNode _focusNode = FocusNode();
   late AnimationController _animController;
   bool _hasFocus = false;
+  
+  // NEW: State to toggle password visibility
+  bool _isObscured = true;
 
   @override
   void initState() {
@@ -405,7 +408,8 @@ class _NeonStrikeInputState extends State<_NeonStrikeInput> with SingleTickerPro
             child: TextFormField(
               focusNode: _focusNode,
               controller: widget.controller,
-              obscureText: widget.isPassword,
+              // MODIFIED: Toggles based on isPassword AND local state
+              obscureText: widget.isPassword && _isObscured,
               validator: widget.validator, 
               style: const TextStyle(color: Colors.white),
               cursorColor: const Color(0xFFEC4899),
@@ -426,8 +430,20 @@ class _NeonStrikeInputState extends State<_NeonStrikeInput> with SingleTickerPro
                   widget.icon, 
                   color: _hasFocus ? const Color(0xFFEC4899) : Colors.white24
                 ),
+                // MODIFIED: Added toggle functionality with GestureDetector to preserve UI layout
                 suffixIcon: widget.isPassword 
-                    ? const Icon(Icons.visibility_off, color: Colors.white24, size: 20) 
+                    ? GestureDetector(
+                        onTap: () {
+                          setState(() {
+                            _isObscured = !_isObscured;
+                          });
+                        },
+                        child: Icon(
+                          _isObscured ? Icons.visibility_off : Icons.visibility,
+                          color: Colors.white24,
+                          size: 20,
+                        ),
+                      )
                     : null,
               ),
             ),

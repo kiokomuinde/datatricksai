@@ -23,8 +23,8 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
   final _formKey = GlobalKey<FormState>(); 
   
   // --- CLOUDINARY CONFIGURATION (FILL THESE IN) ---
-  final String _cloudName = "dgdnli7vh"; 
-  final String _uploadPreset = "resumes_careers"; 
+  final String _cloudName = "YOUR_CLOUD_NAME"; 
+  final String _uploadPreset = "YOUR_UPLOAD_PRESET"; 
   // ------------------------------------------------
 
   // Form Controllers
@@ -34,6 +34,9 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
   final _phoneController = TextEditingController();
   final _zipController = TextEditingController();
   final _linkedinController = TextEditingController();
+  
+  // NEW: Controller for "Other" source
+  final _otherSourceController = TextEditingController(); 
   
   // DROPDOWN STATE
   String? _selectedRole;
@@ -50,9 +53,6 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
   Uint8List? _resumeBytes; 
   String? _fileError; 
 
-  // Loading State
-  bool _isSubmitting = false;
-
   final List<String> _roles = [
     "AI Data Annotator (Text)",
     "AI Data Annotator (Image/Video)",
@@ -62,12 +62,20 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
     "Project Manager"
   ];
 
+  // --- UPDATED SOURCE LIST ---
   final List<String> _sources = [
     "LinkedIn",
     "Indeed",
+    "Glassdoor",
+    "Google Search",
     "Company Website",
+    "Facebook",
+    "Instagram",
+    "Twitter / X",
+    "University / Campus",
+    "Job Fair",
     "Referral",
-    "Other"
+    "Other" 
   ];
 
   final Map<String, List<String>> _usaStates = {
@@ -126,38 +134,12 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
     }
   }
 
-  // --- CLOUDINARY UPLOAD LOGIC ---
-  Future<String?> _uploadToCloudinary(Uint8List fileBytes, String fileName) async {
-    try {
-      var uri = Uri.parse("https://api.cloudinary.com/v1_1/$_cloudName/auto/upload");
-      var request = http.MultipartRequest("POST", uri);
-
-      request.fields['upload_preset'] = _uploadPreset;
-      request.files.add(http.MultipartFile.fromBytes('file', fileBytes, filename: fileName));
-
-      var response = await request.send();
-
-      if (response.statusCode == 200) {
-        var responseData = await response.stream.toBytes();
-        var responseString = String.fromCharCodes(responseData);
-        var jsonMap = jsonDecode(responseString);
-        return jsonMap['secure_url']; 
-      } else {
-        debugPrint("Cloudinary Error: ${response.statusCode}");
-        return null;
-      }
-    } catch (e) {
-      debugPrint("Upload Exception: $e");
-      return null;
-    }
-  }
-
-  Future<void> _submitApplication() async {
-    setState(() => _fileError = null);
-    
+  void _submitApplication() {
     // 1. Validation
+    setState(() => _fileError = null);
     bool isFormValid = _formKey.currentState!.validate();
     bool isFileValid = true;
+    
     if (_resumeFile == null || _resumeBytes == null) {
       setState(() => _fileError = "Resume is required (PDF or DOCX)");
       isFileValid = false;
@@ -165,52 +147,37 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
 
     if (!isFormValid || !isFileValid) return;
 
-    // 2. Start Submission
-    setState(() => _isSubmitting = true);
-
-    try {
-      // A. Upload to Cloudinary
-      String? resumeUrl = await _uploadToCloudinary(_resumeBytes!, _resumeFile!.name);
-
-      if (resumeUrl == null) throw Exception("Resume upload failed. Please try again.");
-
-      // B. Save to Firestore
-      await FirebaseFirestore.instance.collection('applications').add({
-        'firstName': _firstNameController.text.trim(),
-        'lastName': _lastNameController.text.trim(),
-        'email': _emailController.text.trim(),
-        'phone': _phoneController.text.trim(),
-        'location': {
-          'state': _selectedState,
-          'city': _selectedCity,
-          'zip': _zipController.text.trim(),
-        },
-        'role': _selectedRole,
-        'linkedin': _linkedinController.text.trim(),
-        'source': _selectedSource,
-        'resumeUrl': resumeUrl,
-        'resumeName': _resumeFile!.name,
-        'appliedAt': FieldValue.serverTimestamp(),
-        'status': 'pending',
-      });
-
-      // 3. SUCCESS -> Navigate to Success Page
-      if (mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => const ApplicationSuccessPage()),
-        );
-      }
-
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error: $e"), backgroundColor: Colors.redAccent),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _isSubmitting = false);
+    // 2. PREPARE DATA
+    // Handle "Other" source logic
+    String finalSource = _selectedSource ?? "";
+    if (_selectedSource == "Other") {
+      finalSource = "Other: ${_otherSourceController.text.trim()}";
     }
+
+    // 3. NAVIGATE TO WAITING PAGE
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => WaitingPage(
+          cloudName: _cloudName,
+          uploadPreset: _uploadPreset,
+          formData: {
+            'firstName': _firstNameController.text.trim(),
+            'lastName': _lastNameController.text.trim(),
+            'email': _emailController.text.trim(), // Used for duplicate check
+            'phone': "+1 ${_phoneController.text.trim()}",
+            'state': _selectedState,
+            'city': _selectedCity,
+            'zip': _zipController.text.trim(),
+            'role': _selectedRole,
+            'linkedin': _linkedinController.text.trim(),
+            'source': finalSource, 
+            'resumeName': _resumeFile!.name,
+          },
+          fileBytes: _resumeBytes!,
+        ),
+      ),
+    );
   }
 
   @override
@@ -274,7 +241,26 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
                             const SizedBox(height: 20),
                             _NeonInput(label: "LinkedIn Profile URL (Optional)", icon: Icons.link, controller: _linkedinController, isOptional: true),
                             const SizedBox(height: 20),
-                            _NeonDropdown(label: "How did you hear about us? (Optional)", value: _selectedSource, items: _sources, onChanged: (val) => setState(() => _selectedSource = val), isOptional: true),
+                            
+                            // SOURCE DROPDOWN
+                            _NeonDropdown(
+                              label: "How did you hear about us? (Optional)", 
+                              value: _selectedSource, 
+                              items: _sources, 
+                              onChanged: (val) => setState(() => _selectedSource = val), 
+                              isOptional: true
+                            ),
+                            
+                            // "OTHER" SPECIFICATION FIELD
+                            if (_selectedSource == "Other") ...[
+                              const SizedBox(height: 15),
+                              _NeonInput(
+                                label: "Please specify", 
+                                controller: _otherSourceController,
+                                isOptional: false, 
+                              ),
+                            ],
+
                             const SizedBox(height: 40),
 
                             _SectionHeader("Resume / CV"),
@@ -322,7 +308,7 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
                             ),
                             
                             const SizedBox(height: 50),
-                            SizedBox(width: double.infinity, child: _GradientButton(text: _isSubmitting ? "Uploading..." : "Submit Application", isLoading: _isSubmitting, onPressed: _isSubmitting ? () {} : _submitApplication)),
+                            SizedBox(width: double.infinity, child: _GradientButton(text: "Submit Application", onPressed: _submitApplication)),
                             const SizedBox(height: 50),
                           ],
                         ),
@@ -344,6 +330,180 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
 }
 
 // ===========================================================================
+// WAITING PAGE (HANDLES UPLOAD & DUPLICATE CHECK)
+// ===========================================================================
+
+class WaitingPage extends StatefulWidget {
+  final Map<String, dynamic> formData;
+  final Uint8List fileBytes;
+  final String cloudName;
+  final String uploadPreset;
+
+  const WaitingPage({
+    super.key, 
+    required this.formData, 
+    required this.fileBytes,
+    required this.cloudName,
+    required this.uploadPreset,
+  });
+
+  @override
+  State<WaitingPage> createState() => _WaitingPageState();
+}
+
+class _WaitingPageState extends State<WaitingPage> {
+
+  @override
+  void initState() {
+    super.initState();
+    _processApplication();
+  }
+
+  Future<void> _processApplication() async {
+    try {
+      // 1. CHECK FOR DUPLICATES (Use Email as Unique ID)
+      final QuerySnapshot duplicateCheck = await FirebaseFirestore.instance
+          .collection('applications')
+          .where('email', isEqualTo: widget.formData['email'])
+          .limit(1)
+          .get();
+
+      if (duplicateCheck.docs.isNotEmpty) {
+        throw Exception("An application with this email already exists.");
+      }
+
+      // 2. Upload Resume to Cloudinary
+      String? resumeUrl = await _uploadToCloudinary(widget.fileBytes, widget.formData['resumeName']);
+      
+      if (resumeUrl == null) {
+        throw Exception("Failed to upload resume. Please try again.");
+      }
+
+      // 3. Save Data to Firestore
+      await FirebaseFirestore.instance.collection('applications').add({
+        'firstName': widget.formData['firstName'],
+        'lastName': widget.formData['lastName'],
+        'email': widget.formData['email'],
+        'phone': widget.formData['phone'],
+        'location': {
+          'state': widget.formData['state'],
+          'city': widget.formData['city'],
+          'zip': widget.formData['zip'],
+        },
+        'role': widget.formData['role'],
+        'linkedin': widget.formData['linkedin'],
+        'source': widget.formData['source'],
+        'resumeUrl': resumeUrl,
+        'resumeName': widget.formData['resumeName'],
+        'appliedAt': FieldValue.serverTimestamp(),
+        'status': 'pending',
+      });
+
+      // 4. SUCCESS -> Navigate to Success Page
+      if (mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const ApplicationSuccessPage()),
+        );
+      }
+
+    } catch (e) {
+      // 5. ERROR -> Go back
+      if (mounted) {
+        // Remove "Exception: " string for cleaner UI
+        String errorMessage = e.toString().replaceAll("Exception: ", "");
+        
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: const Color(0xFF0F172A),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+              side: BorderSide(color: Colors.redAccent.withOpacity(0.2))
+            ),
+            title: const Row(
+              children: [
+                Icon(Icons.error_outline, color: Colors.redAccent),
+                SizedBox(width: 10),
+                Text("Submission Error", style: TextStyle(color: Colors.redAccent)),
+              ],
+            ),
+            content: Text(errorMessage, style: const TextStyle(color: Colors.white70)),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(ctx); // Close dialog
+                  Navigator.pop(context); // Go back to form
+                },
+                child: const Text("Go Back", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              )
+            ],
+          ),
+        );
+      }
+    }
+  }
+
+  Future<String?> _uploadToCloudinary(Uint8List fileBytes, String fileName) async {
+    try {
+      var uri = Uri.parse("https://api.cloudinary.com/v1_1/${widget.cloudName}/auto/upload");
+      var request = http.MultipartRequest("POST", uri);
+
+      request.fields['upload_preset'] = widget.uploadPreset;
+      request.files.add(http.MultipartFile.fromBytes('file', fileBytes, filename: fileName));
+
+      var response = await request.send().timeout(const Duration(seconds: 45));
+
+      if (response.statusCode == 200) {
+        var responseData = await response.stream.toBytes();
+        var responseString = String.fromCharCodes(responseData);
+        var jsonMap = jsonDecode(responseString);
+        return jsonMap['secure_url']; 
+      }
+      return null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF020408),
+      body: Stack(
+        children: [
+          const _BackgroundCanvas(),
+          Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const SizedBox(
+                  height: 60,
+                  width: 60,
+                  child: CircularProgressIndicator(color: Color(0xFF6366F1), strokeWidth: 4),
+                ),
+                const SizedBox(height: 30),
+                const Text(
+                  "Processing Application...",
+                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white),
+                ),
+                const SizedBox(height: 10),
+                const Text(
+                  "Checking eligibility and uploading files.\nPlease do not close the app.",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 14, color: Colors.white54),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ===========================================================================
 // APPLICATION SUCCESS PAGE
 // ===========================================================================
 
@@ -358,41 +518,60 @@ class ApplicationSuccessPage extends StatelessWidget {
         children: [
           const _BackgroundCanvas(),
           Center(
-            child: Container(
-              padding: const EdgeInsets.all(40),
-              constraints: const BoxConstraints(maxWidth: 500),
-              decoration: BoxDecoration(
-                color: const Color(0xFF0F172A).withOpacity(0.8),
-                borderRadius: BorderRadius.circular(30),
-                border: Border.all(color: Colors.white.withOpacity(0.1)),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.rocket_launch_rounded, size: 80, color: Color(0xFF6366F1)),
-                  const SizedBox(height: 30),
-                  const Text(
-                    "Application Sent!",
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Colors.white),
-                  ),
-                  const SizedBox(height: 15),
-                  const Text(
-                    "Thank you for reaching out to DataTricks AI. We have received your details and resume. Our recruitment team will review your profile and contact you if you are a good match.",
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 16, color: Colors.white70, height: 1.5),
-                  ),
-                  const SizedBox(height: 40),
-                  SizedBox(
-                    width: double.infinity,
-                    child: _GradientButton(
-                      text: "Back to Home", 
-                      onPressed: () {
-                         Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
-                      }
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: Container(
+                padding: const EdgeInsets.all(40),
+                constraints: const BoxConstraints(maxWidth: 500),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0F172A).withOpacity(0.95),
+                  borderRadius: BorderRadius.circular(30),
+                  border: Border.all(color: Colors.white.withOpacity(0.1)),
+                  boxShadow: [
+                    BoxShadow(color: Colors.black.withOpacity(0.5), blurRadius: 20, offset: const Offset(0, 10))
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF6366F1).withOpacity(0.1),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.check_rounded, size: 60, color: Color(0xFF6366F1)),
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 30),
+                    const Text(
+                      "Application Sent!",
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Colors.white),
+                    ),
+                    const SizedBox(height: 15),
+                    const Text(
+                      "Thank you for reaching out to DataTricks AI. We have received your details and resume. Our recruitment team will review your profile and contact you if you are a good match.",
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 16, color: Colors.white70, height: 1.5),
+                    ),
+                    const SizedBox(height: 40),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: () {
+                           Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF6366F1),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 18),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        child: const Text("Return to Home", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -420,7 +599,17 @@ class _NeonInput extends StatelessWidget {
   final IconData? icon;
   final TextEditingController controller;
   final bool isEmail, isPhone, isZip, isOptional;
-  const _NeonInput({required this.label, this.icon, required this.controller, this.isEmail = false, this.isPhone = false, this.isZip = false, this.isOptional = false});
+
+  const _NeonInput({
+    required this.label, 
+    this.icon, 
+    required this.controller, 
+    this.isEmail = false, 
+    this.isPhone = false, 
+    this.isZip = false, 
+    this.isOptional = false
+  });
+
   @override
   Widget build(BuildContext context) {
     return TextFormField(
@@ -435,7 +624,18 @@ class _NeonInput extends StatelessWidget {
         if (isZip && !RegExp(r'^\d{5}(-\d{4})?$').hasMatch(val)) return "Invalid Zip";
         return null;
       },
-      decoration: InputDecoration(labelText: label, labelStyle: const TextStyle(color: Colors.white38), filled: true, fillColor: Colors.white.withOpacity(0.05), prefixIcon: icon != null ? Icon(icon, color: Colors.white24, size: 18) : null, border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none), focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF6366F1))), errorStyle: const TextStyle(color: Colors.redAccent, height: 1)),
+      decoration: InputDecoration(
+        labelText: label, 
+        labelStyle: const TextStyle(color: Colors.white38),
+        filled: true, 
+        fillColor: Colors.white.withOpacity(0.05),
+        prefixText: isPhone ? "+1 " : null,
+        prefixStyle: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+        prefixIcon: icon != null ? Icon(icon, color: Colors.white24, size: 18) : null, 
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none), 
+        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF6366F1))), 
+        errorStyle: const TextStyle(color: Colors.redAccent, height: 1)
+      ),
     );
   }
 }
@@ -460,11 +660,10 @@ class _NeonDropdown extends StatelessWidget {
 class _GradientButton extends StatelessWidget {
   final String text;
   final VoidCallback onPressed;
-  final bool isLoading;
-  const _GradientButton({required this.text, required this.onPressed, this.isLoading = false});
+  const _GradientButton({required this.text, required this.onPressed});
   @override
   Widget build(BuildContext context) {
-    return Container(decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), gradient: const LinearGradient(colors: [Color(0xFF6366F1), Color(0xFFEC4899)], begin: Alignment.topLeft, end: Alignment.bottomRight), boxShadow: const [BoxShadow(color: Color(0xFF6366F1), blurRadius: 20, offset: Offset(0, 5), spreadRadius: -5)]), child: ElevatedButton(onPressed: onPressed, style: ElevatedButton.styleFrom(backgroundColor: Colors.transparent, shadowColor: Colors.transparent, padding: const EdgeInsets.symmetric(vertical: 22), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))), child: isLoading ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : Text(text, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white))));
+    return Container(decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), gradient: const LinearGradient(colors: [Color(0xFF6366F1), Color(0xFFEC4899)], begin: Alignment.topLeft, end: Alignment.bottomRight), boxShadow: const [BoxShadow(color: Color(0xFF6366F1), blurRadius: 20, offset: Offset(0, 5), spreadRadius: -5)]), child: ElevatedButton(onPressed: onPressed, style: ElevatedButton.styleFrom(backgroundColor: Colors.transparent, shadowColor: Colors.transparent, padding: const EdgeInsets.symmetric(vertical: 22), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))), child: Text(text, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white))));
   }
 }
 
