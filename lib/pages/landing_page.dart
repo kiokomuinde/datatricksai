@@ -191,13 +191,19 @@ class _HeroSection extends StatelessWidget {
                   _PrimaryButton(
                     text: "Hire Annotators",
                     icon: Icons.business_center,
-                    onPressed: () {},
+                    onPressed: () {
+                      // UPDATED: Navigates to Careers Page
+                      Navigator.pushNamed(context, '/careers');
+                    },
                     color: const Color(0xFF6366F1), // Indigo
                   ),
                   _PrimaryButton(
                     text: "Start Earning",
                     icon: Icons.monetization_on,
-                    onPressed: () {},
+                    onPressed: () {
+                      // UPDATED: Navigates to Careers Page
+                      Navigator.pushNamed(context, '/careers');
+                    },
                     color: const Color(0xFF10B981), // Emerald Green for Money
                   ),
                 ],
@@ -1116,7 +1122,15 @@ class _FixedSmartNavbar extends StatelessWidget {
                   if (MediaQuery.of(context).size.width > 800) ...[
                     TextButton(onPressed: () {}, child: const Text("For Business", style: TextStyle(color: Colors.white70))),
                     const SizedBox(width: 20),
-                    TextButton(onPressed: () {}, child: const Text("For Annotators", style: TextStyle(color: Colors.white70))),
+                    
+                    // UPDATED: "For Annotators" button in Navbar
+                    TextButton(
+                      onPressed: () {
+                         Navigator.pushNamed(context, '/careers');
+                      }, 
+                      child: const Text("For Annotators", style: TextStyle(color: Colors.white70))
+                    ),
+                    
                     const SizedBox(width: 20),
                   ],
                   const SizedBox(width: 20),

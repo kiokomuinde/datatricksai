@@ -35,9 +35,12 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
   final _zipController = TextEditingController();
   final _linkedinController = TextEditingController();
   
-  // NEW: Controller for "Other" source
+  // Controller for "Other" source
   final _otherSourceController = TextEditingController(); 
   
+  // Controller for High School
+  final _highSchoolController = TextEditingController();
+
   // DROPDOWN STATE
   String? _selectedRole;
   String? _selectedSource;
@@ -48,10 +51,15 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
   List<String> _cities = [];
   bool _isLoadingCities = false;
 
-  // File Upload State
+  // File Upload State (Resume)
   PlatformFile? _resumeFile;
   Uint8List? _resumeBytes; 
   String? _fileError; 
+
+  // File Upload State (Supporting Documents)
+  PlatformFile? _suppFile;
+  Uint8List? _suppBytes;
+  String? _suppFileError;
 
   final List<String> _roles = [
     "AI Data Annotator (Text)",
@@ -62,7 +70,6 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
     "Project Manager"
   ];
 
-  // --- UPDATED SOURCE LIST ---
   final List<String> _sources = [
     "LinkedIn",
     "Indeed",
@@ -134,21 +141,55 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
     }
   }
 
+  // Action to pick Supporting Document (Transcripts)
+  Future<void> _pickSuppFile() async {
+    try {
+      setState(() => _suppFileError = null);
+
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['pdf', 'doc', 'docx', 'jpg', 'png'], 
+        withData: true, 
+      );
+
+      if (result != null) {
+        setState(() {
+          _suppFile = result.files.first;
+          _suppBytes = result.files.first.bytes;
+          _suppFileError = null; 
+        });
+      }
+    } catch (e) {
+      debugPrint("Error picking file: $e");
+    }
+  }
+
   void _submitApplication() {
     // 1. Validation
-    setState(() => _fileError = null);
-    bool isFormValid = _formKey.currentState!.validate();
-    bool isFileValid = true;
+    setState(() {
+      _fileError = null;
+      _suppFileError = null;
+    });
     
+    bool isFormValid = _formKey.currentState!.validate();
+    bool isResumeValid = true;
+    bool isSuppValid = true;
+    
+    // Validate Resume
     if (_resumeFile == null || _resumeBytes == null) {
       setState(() => _fileError = "Resume is required (PDF or DOCX)");
-      isFileValid = false;
+      isResumeValid = false;
     }
 
-    if (!isFormValid || !isFileValid) return;
+    // Validate Supporting Document (Transcripts)
+    if (_suppFile == null || _suppBytes == null) {
+      setState(() => _suppFileError = "High School Transcripts are required");
+      isSuppValid = false;
+    }
+
+    if (!isFormValid || !isResumeValid || !isSuppValid) return;
 
     // 2. PREPARE DATA
-    // Handle "Other" source logic
     String finalSource = _selectedSource ?? "";
     if (_selectedSource == "Other") {
       finalSource = "Other: ${_otherSourceController.text.trim()}";
@@ -164,17 +205,20 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
           formData: {
             'firstName': _firstNameController.text.trim(),
             'lastName': _lastNameController.text.trim(),
-            'email': _emailController.text.trim(), // Used for duplicate check
+            'email': _emailController.text.trim(),
             'phone': "+1 ${_phoneController.text.trim()}",
             'state': _selectedState,
             'city': _selectedCity,
             'zip': _zipController.text.trim(),
+            'highSchool': _highSchoolController.text.trim(), 
             'role': _selectedRole,
             'linkedin': _linkedinController.text.trim(),
             'source': finalSource, 
             'resumeName': _resumeFile!.name,
+            'suppDocName': _suppFile!.name, 
           },
-          fileBytes: _resumeBytes!,
+          resumeBytes: _resumeBytes!,
+          suppBytes: _suppBytes!, 
         ),
       ),
     );
@@ -235,6 +279,12 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
                             ]),
                             const SizedBox(height: 40),
 
+                            // --- EDUCATION SECTION ---
+                            _SectionHeader("Education"),
+                            const SizedBox(height: 20),
+                            _NeonInput(label: "High School Name", controller: _highSchoolController, icon: Icons.school),
+                            const SizedBox(height: 40),
+
                             _SectionHeader("Role & Experience"),
                             const SizedBox(height: 20),
                             _NeonDropdown(label: "Position Applying For", value: _selectedRole, items: _roles, onChanged: (val) => setState(() => _selectedRole = val)),
@@ -242,7 +292,6 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
                             _NeonInput(label: "LinkedIn Profile URL (Optional)", icon: Icons.link, controller: _linkedinController, isOptional: true),
                             const SizedBox(height: 20),
                             
-                            // SOURCE DROPDOWN
                             _NeonDropdown(
                               label: "How did you hear about us? (Optional)", 
                               value: _selectedSource, 
@@ -251,7 +300,6 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
                               isOptional: true
                             ),
                             
-                            // "OTHER" SPECIFICATION FIELD
                             if (_selectedSource == "Other") ...[
                               const SizedBox(height: 15),
                               _NeonInput(
@@ -266,7 +314,7 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
                             _SectionHeader("Resume / CV"),
                             const SizedBox(height: 15),
                             
-                            // FILE UPLOAD WIDGET
+                            // RESUME UPLOAD WIDGET
                             InkWell(
                               onTap: _pickResume,
                               borderRadius: BorderRadius.circular(12),
@@ -306,6 +354,54 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
                                 ]),
                               ),
                             ),
+
+                            const SizedBox(height: 40),
+
+                            // --- SUPPORTING DOCUMENTS (TRANSCRIPTS) SECTION ---
+                            // Updated Header and Button Text as requested
+                            _SectionHeader("Supporting Documents (Transcripts)"),
+                            const SizedBox(height: 15),
+                            
+                            InkWell(
+                              onTap: _pickSuppFile,
+                              borderRadius: BorderRadius.circular(12),
+                              child: Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.symmetric(vertical: 30),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.02),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: _suppFileError != null ? Colors.redAccent : Colors.white24, 
+                                    style: BorderStyle.solid,
+                                    width: _suppFileError != null ? 1.5 : 1.0,
+                                  ),
+                                ),
+                                child: Column(children: [
+                                    Icon(
+                                      _suppFile == null ? Icons.folder_open : Icons.check_circle, 
+                                      size: 40, 
+                                      color: _suppFileError != null ? Colors.redAccent : (_suppFile == null ? Colors.white54 : const Color(0xFF6366F1))
+                                    ),
+                                    const SizedBox(height: 10),
+                                    // UPDATED TEXT HERE
+                                    Text(
+                                      _suppFile == null ? "Click to upload High School Transcripts" : _suppFile!.name,
+                                      style: TextStyle(
+                                        color: _suppFileError != null ? Colors.redAccent : (_suppFile == null ? Colors.white54 : Colors.white),
+                                        fontWeight: _suppFile == null ? FontWeight.normal : FontWeight.bold
+                                      ),
+                                    ),
+                                    if (_suppFileError != null) ...[
+                                      const SizedBox(height: 10),
+                                      Text(
+                                        _suppFileError!, 
+                                        style: const TextStyle(color: Colors.redAccent, fontSize: 13, fontWeight: FontWeight.bold)
+                                      )
+                                    ]
+                                ]),
+                              ),
+                            ),
                             
                             const SizedBox(height: 50),
                             SizedBox(width: double.infinity, child: _GradientButton(text: "Submit Application", onPressed: _submitApplication)),
@@ -335,14 +431,16 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
 
 class WaitingPage extends StatefulWidget {
   final Map<String, dynamic> formData;
-  final Uint8List fileBytes;
+  final Uint8List resumeBytes; 
+  final Uint8List suppBytes; 
   final String cloudName;
   final String uploadPreset;
 
   const WaitingPage({
     super.key, 
     required this.formData, 
-    required this.fileBytes,
+    required this.resumeBytes,
+    required this.suppBytes,
     required this.cloudName,
     required this.uploadPreset,
   });
@@ -373,13 +471,18 @@ class _WaitingPageState extends State<WaitingPage> {
       }
 
       // 2. Upload Resume to Cloudinary
-      String? resumeUrl = await _uploadToCloudinary(widget.fileBytes, widget.formData['resumeName']);
-      
+      String? resumeUrl = await _uploadToCloudinary(widget.resumeBytes, widget.formData['resumeName']);
       if (resumeUrl == null) {
         throw Exception("Failed to upload resume. Please try again.");
       }
 
-      // 3. Save Data to Firestore
+      // 3. Upload Supporting Document (Transcripts) to Cloudinary
+      String? suppUrl = await _uploadToCloudinary(widget.suppBytes, widget.formData['suppDocName']);
+      if (suppUrl == null) {
+        throw Exception("Failed to upload supporting document. Please try again.");
+      }
+
+      // 4. Save Data to Firestore 
       await FirebaseFirestore.instance.collection('applications').add({
         'firstName': widget.formData['firstName'],
         'lastName': widget.formData['lastName'],
@@ -390,16 +493,19 @@ class _WaitingPageState extends State<WaitingPage> {
           'city': widget.formData['city'],
           'zip': widget.formData['zip'],
         },
+        'highSchool': widget.formData['highSchool'], 
         'role': widget.formData['role'],
         'linkedin': widget.formData['linkedin'],
         'source': widget.formData['source'],
         'resumeUrl': resumeUrl,
         'resumeName': widget.formData['resumeName'],
+        'suppDocUrl': suppUrl, 
+        'suppDocName': widget.formData['suppDocName'],
         'appliedAt': FieldValue.serverTimestamp(),
         'status': 'pending',
       });
 
-      // 4. SUCCESS -> Navigate to Success Page
+      // 5. SUCCESS -> Navigate to Success Page
       if (mounted) {
         Navigator.pushReplacement(
           context,
@@ -408,9 +514,8 @@ class _WaitingPageState extends State<WaitingPage> {
       }
 
     } catch (e) {
-      // 5. ERROR -> Go back
+      // 6. ERROR -> Go back
       if (mounted) {
-        // Remove "Exception: " string for cleaner UI
         String errorMessage = e.toString().replaceAll("Exception: ", "");
         
         showDialog(
@@ -433,8 +538,8 @@ class _WaitingPageState extends State<WaitingPage> {
             actions: [
               TextButton(
                 onPressed: () {
-                  Navigator.pop(ctx); // Close dialog
-                  Navigator.pop(context); // Go back to form
+                  Navigator.pop(ctx); 
+                  Navigator.pop(context); 
                 },
                 child: const Text("Go Back", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
               )

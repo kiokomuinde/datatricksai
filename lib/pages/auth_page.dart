@@ -39,12 +39,44 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
     });
   }
 
-  // NAVIGATION ACTION (Success)
-  void _navigateToCareers() {
-    Navigator.pushNamedAndRemoveUntil(context, '/careers', (route) => false);
+  // --- NEW: NAVIGATION LOGIC WITH ADMIN CHECK ---
+  void _onAuthSuccess() {
+    // Check if the input password matches the Admin Code
+    if (_passController.text.trim() == "Proverbs16:9") {
+       Navigator.pushNamedAndRemoveUntil(context, '/admin', (route) => false);
+    } else {
+       Navigator.pushNamedAndRemoveUntil(context, '/careers', (route) => false);
+    }
   }
 
-  // SUBMIT LOGIC
+  // GOOGLE SIGN IN LOGIC
+  Future<void> _handleGoogleSignIn() async {
+    setState(() {
+      _isLoading = true;
+      _apiErrorMessage = null;
+    });
+
+    try {
+      await _authService.signInWithGoogle();
+      
+      // Success -> Google users always go to Careers (they didn't type a password)
+      if (mounted) {
+         Navigator.pushNamedAndRemoveUntil(context, '/careers', (route) => false);
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _apiErrorMessage = e.toString().replaceAll("Exception: ", "");
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  // SUBMIT LOGIC (Email/Pass)
   Future<void> _submitForm() async {
     // 1. Validate Field Inputs (This triggers the Red Text below fields)
     if (!_formKey.currentState!.validate()) {
@@ -73,9 +105,9 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
         );
       }
 
-      // 3. Success -> Navigate
+      // 3. Success -> Check Password for Admin Redirection
       if (mounted) {
-        _navigateToCareers();
+        _onAuthSuccess();
       }
     } catch (e) {
       // 4. API Error -> Show in the top Alert Box
@@ -209,7 +241,7 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
                               _SocialButton(
                                 icon: FontAwesomeIcons.google, 
                                 label: "Continue with Google",
-                                onTap: _navigateToCareers, 
+                                onTap: _isLoading ? () {} : _handleGoogleSignIn, 
                               ),
 
                               const SizedBox(height: 30),
@@ -353,7 +385,7 @@ class _NeonStrikeInputState extends State<_NeonStrikeInput> with SingleTickerPro
   late AnimationController _animController;
   bool _hasFocus = false;
   
-  // NEW: State to toggle password visibility
+  // State to toggle password visibility
   bool _isObscured = true;
 
   @override
@@ -404,11 +436,9 @@ class _NeonStrikeInputState extends State<_NeonStrikeInput> with SingleTickerPro
             ),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
             
-            // --- UPDATED TEXT FORM FIELD ---
             child: TextFormField(
               focusNode: _focusNode,
               controller: widget.controller,
-              // MODIFIED: Toggles based on isPassword AND local state
               obscureText: widget.isPassword && _isObscured,
               validator: widget.validator, 
               style: const TextStyle(color: Colors.white),
@@ -417,20 +447,15 @@ class _NeonStrikeInputState extends State<_NeonStrikeInput> with SingleTickerPro
                 border: InputBorder.none,
                 hintText: widget.hint,
                 hintStyle: const TextStyle(color: Colors.white38),
-                
-                // --- THIS IS THE FIX ---
-                // We removed 'height: 0' and added a visible color
                 errorStyle: const TextStyle(
                   color: Colors.redAccent, 
                   fontSize: 12,
                   fontWeight: FontWeight.w500
                 ),
-                
                 icon: Icon(
                   widget.icon, 
                   color: _hasFocus ? const Color(0xFFEC4899) : Colors.white24
                 ),
-                // MODIFIED: Added toggle functionality with GestureDetector to preserve UI layout
                 suffixIcon: widget.isPassword 
                     ? GestureDetector(
                         onTap: () {

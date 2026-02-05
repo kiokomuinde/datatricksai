@@ -17,6 +17,25 @@ class AuthService {
   // AUTH ACTIONS
   // ---------------------------------------------------------------------------
 
+  // Sign In with Google
+  Future<User?> signInWithGoogle() async {
+    try {
+      // Create a new provider
+      GoogleAuthProvider googleProvider = GoogleAuthProvider();
+
+      // Ensure we ask for the correct scope (profile, email are default)
+      googleProvider.addScope('email');
+
+      // 1. Trigger the Authentication Flow
+      // For web, signInWithPopup is usually preferred over redirect
+      UserCredential result = await _auth.signInWithPopup(googleProvider);
+
+      return result.user;
+    } on FirebaseAuthException catch (e) {
+      throw _handleAuthException(e);
+    }
+  }
+
   // Sign In with Email & Password
   Future<User?> signIn({required String email, required String password}) async {
     try {
@@ -62,7 +81,7 @@ class AuthService {
     await _auth.signOut();
   }
 
-  // Password Reset (New Addition)
+  // Password Reset
   Future<void> sendPasswordResetEmail(String email) async {
     try {
       await _auth.sendPasswordResetEmail(email: email.trim());
@@ -84,16 +103,20 @@ class AuthService {
         return 'Wrong password provided.';
       case 'email-already-in-use':
         return 'The account already exists for that email.';
+      case 'credential-already-in-use':
+        return 'This email is already associated with a different account.';
       case 'invalid-email':
         return 'The email address is not valid.';
       case 'weak-password':
         return 'The password provided is too weak.';
       case 'operation-not-allowed':
-        return 'Email/password accounts are not enabled in Firebase Console.';
+        return 'Google Sign-In is not enabled in Firebase Console.';
+      case 'popup-closed-by-user':
+        return 'Sign-in cancelled by user.';
       case 'too-many-requests':
         return 'Too many requests. Try again later.';
       default:
-        return 'An error occurred. Please try again.';
+        return 'An error occurred: ${e.message}';
     }
   }
 }
