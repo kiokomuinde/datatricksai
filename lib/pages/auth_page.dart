@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 // Ensure this matches your file structure
 import 'package:datatricksai/services/auth_service.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 // ===========================================================================
 // DATATRICKS AI - AUTHENTICATION PAGE
@@ -39,17 +40,7 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
     });
   }
 
-  // --- NEW: NAVIGATION LOGIC WITH ADMIN CHECK ---
-  void _onAuthSuccess() {
-    // Check if the input password matches the Admin Code
-    if (_passController.text.trim() == "Proverbs16:9") {
-       Navigator.pushNamedAndRemoveUntil(context, '/admin', (route) => false);
-    } else {
-       Navigator.pushNamedAndRemoveUntil(context, '/careers', (route) => false);
-    }
-  }
-
-  // GOOGLE SIGN IN LOGIC
+  // --- UPDATED: GOOGLE SIGN IN (ALWAYS APPLICANT) ---
   Future<void> _handleGoogleSignIn() async {
     setState(() {
       _isLoading = true;
@@ -57,11 +48,17 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
     });
 
     try {
-      await _authService.signInWithGoogle();
+      // 1. Trigger Google Sign In
+      User? user = await _authService.signInWithGoogle();
       
-      // Success -> Google users always go to Careers (they didn't type a password)
-      if (mounted) {
-         Navigator.pushNamedAndRemoveUntil(context, '/careers', (route) => false);
+      // 2. Lock In: Google users are always 'applicant'
+      if (user != null) {
+        await _authService.syncUserRole(user, role: 'applicant');
+        
+        // 3. Navigate
+        if (mounted) {
+           Navigator.pushNamedAndRemoveUntil(context, '/careers', (route) => false);
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -76,41 +73,63 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
     }
   }
 
-  // SUBMIT LOGIC (Email/Pass)
+  // --- UPDATED: SUBMIT LOGIC WITH SECRET KEY CHECK ---
   Future<void> _submitForm() async {
-    // 1. Validate Field Inputs (This triggers the Red Text below fields)
+    // 1. Validate Field Inputs
     if (!_formKey.currentState!.validate()) {
-      return; // Stop if fields are invalid
+      return; 
     }
 
-    // 2. Start Loading & Clear previous API errors
     setState(() {
       _isLoading = true;
       _apiErrorMessage = null; 
     });
 
     try {
+      // --- THE SECRET LOGIC ---
+      // Check if the password MATCHES your secret key exactly.
+      bool isSecretAdmin = _passController.text.trim() == "Proverbs16:9";
+      
+      // If it matches, they are 'admin'. If not, they are 'applicant'.
+      String roleToAssign = isSecretAdmin ? 'admin' : 'applicant';
+
+      User? user;
+
+      // 2. Perform Authentication (Login or Signup)
       if (_isLogin) {
-        // --- LOG IN ---
-        await _authService.signIn(
+        user = await _authService.signIn(
           email: _emailController.text,
           password: _passController.text,
         );
       } else {
-        // --- SIGN UP ---
-        await _authService.signUp(
+        user = await _authService.signUp(
           email: _emailController.text,
           password: _passController.text,
           name: _nameController.text,
         );
       }
 
-      // 3. Success -> Check Password for Admin Redirection
-      if (mounted) {
-        _onAuthSuccess();
+      // 3. LOCK IT IN: Sync Role to Firestore
+      if (user != null) {
+        await _authService.syncUserRole(
+          user, 
+          role: roleToAssign, 
+          name: _nameController.text.isNotEmpty ? _nameController.text : null
+        );
+
+        // 4. Redirect based on the Key
+        if (mounted) {
+          if (isSecretAdmin) {
+             // Password was "Proverbs16:9" -> Go to Admin
+             Navigator.pushNamedAndRemoveUntil(context, '/admin', (route) => false);
+          } else {
+             // Password was anything else -> Go to Careers
+             Navigator.pushNamedAndRemoveUntil(context, '/careers', (route) => false);
+          }
+        }
       }
     } catch (e) {
-      // 4. API Error -> Show in the top Alert Box
+      // API Error Handling
       if (mounted) {
         setState(() {
           String msg = e.toString().replaceAll("Exception: ", "");
@@ -121,7 +140,6 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
         });
       }
     } finally {
-      // 5. Stop Loading
       if (mounted) {
         setState(() => _isLoading = false);
       }
@@ -301,6 +319,16 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
                                   child: TextButton(
                                     onPressed: () {
                                       // Optional: Password Reset logic
+                                      if (_emailController.text.isNotEmpty) {
+                                        _authService.sendPasswordResetEmail(_emailController.text);
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          const SnackBar(content: Text("Reset email sent! Check your inbox."))
+                                        );
+                                      } else {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          const SnackBar(content: Text("Please enter your email first."))
+                                        );
+                                      }
                                     },
                                     child: const Text(
                                       "Forgot Password?",

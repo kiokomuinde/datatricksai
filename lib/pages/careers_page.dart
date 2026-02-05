@@ -23,8 +23,8 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
   final _formKey = GlobalKey<FormState>(); 
   
   // --- CLOUDINARY CONFIGURATION (FILL THESE IN) ---
-  final String _cloudName = "YOUR_CLOUD_NAME"; 
-  final String _uploadPreset = "YOUR_UPLOAD_PRESET"; 
+  final String _cloudName = "dgdnli7vh"; 
+  final String _uploadPreset = "resumes_careers"; // MUST BE 'UNSIGNED' & 'PUBLIC' IN CLOUDINARY
   // ------------------------------------------------
 
   // Form Controllers
@@ -358,7 +358,6 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
                             const SizedBox(height: 40),
 
                             // --- SUPPORTING DOCUMENTS (TRANSCRIPTS) SECTION ---
-                            // Updated Header and Button Text as requested
                             _SectionHeader("Supporting Documents (Transcripts)"),
                             const SizedBox(height: 15),
                             
@@ -384,7 +383,6 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
                                       color: _suppFileError != null ? Colors.redAccent : (_suppFile == null ? Colors.white54 : const Color(0xFF6366F1))
                                     ),
                                     const SizedBox(height: 10),
-                                    // UPDATED TEXT HERE
                                     Text(
                                       _suppFile == null ? "Click to upload High School Transcripts" : _suppFile!.name,
                                       style: TextStyle(
@@ -517,6 +515,7 @@ class _WaitingPageState extends State<WaitingPage> {
       // 6. ERROR -> Go back
       if (mounted) {
         String errorMessage = e.toString().replaceAll("Exception: ", "");
+        debugPrint("Application Process Error: $e");
         
         showDialog(
           context: context,
@@ -552,11 +551,18 @@ class _WaitingPageState extends State<WaitingPage> {
 
   Future<String?> _uploadToCloudinary(Uint8List fileBytes, String fileName) async {
     try {
+      // IMPORTANT: Use the 'auto' endpoint so Cloudinary detects PDF/Image/Raw correctly.
       var uri = Uri.parse("https://api.cloudinary.com/v1_1/${widget.cloudName}/auto/upload");
       var request = http.MultipartRequest("POST", uri);
 
       request.fields['upload_preset'] = widget.uploadPreset;
-      request.files.add(http.MultipartFile.fromBytes('file', fileBytes, filename: fileName));
+      
+      // Sending file bytes with filename is crucial for Cloudinary to detect extension
+      request.files.add(http.MultipartFile.fromBytes(
+        'file', 
+        fileBytes, 
+        filename: fileName
+      ));
 
       var response = await request.send().timeout(const Duration(seconds: 45));
 
@@ -564,10 +570,18 @@ class _WaitingPageState extends State<WaitingPage> {
         var responseData = await response.stream.toBytes();
         var responseString = String.fromCharCodes(responseData);
         var jsonMap = jsonDecode(responseString);
+        
+        // This 'secure_url' will now correspond to the correct resource type (image or raw)
         return jsonMap['secure_url']; 
+      } else {
+        debugPrint("Cloudinary Upload Failed: ${response.statusCode}");
+        // Optional: Read response body for specific error message from Cloudinary
+        // var responseData = await response.stream.toBytes();
+        // debugPrint(String.fromCharCodes(responseData));
+        return null;
       }
-      return null;
     } catch (e) {
+      debugPrint("Cloudinary Exception: $e");
       return null;
     }
   }

@@ -1,9 +1,10 @@
 import 'dart:ui';
 import 'dart:math' as math;
 // ignore: avoid_web_libraries_in_flutter
-import 'dart:html' as html; // REQUIRED FOR WEB DOWNLOADS
+import 'dart:html' as html; // REQUIRED FOR WEB ACTIONS
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 // ===========================================================================
 // DATATRICKS AI - ADMIN DASHBOARD (WEB OPTIMIZED)
@@ -19,9 +20,31 @@ class AdminDashboard extends StatefulWidget {
 class _AdminDashboardState extends State<AdminDashboard> with TickerProviderStateMixin {
   
   @override
+  void initState() {
+    super.initState();
+    _checkAuth();
+  }
+
+  /// SECURITY CHECK: Redirects to login if no user is found
+  void _checkAuth() {
+    FirebaseAuth.instance.authStateChanges().listen((User? user) {
+      if (user == null && mounted) {
+        Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
+      }
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
+    if (FirebaseAuth.instance.currentUser == null) {
+      return const Scaffold(
+        backgroundColor: Color(0xFF020408),
+        body: Center(child: CircularProgressIndicator(color: Color(0xFF6366F1))),
+      );
+    }
+
     return Scaffold(
-      backgroundColor: const Color(0xFF020408), // Theme Background
+      backgroundColor: const Color(0xFF020408),
       body: Stack(
         children: [
           // Background Painter
@@ -30,8 +53,11 @@ class _AdminDashboardState extends State<AdminDashboard> with TickerProviderStat
           Column(
             children: [
               // NAVBAR
-              _AdminNavbar(onLogout: () {
-                Navigator.pushNamedAndRemoveUntil(context, '/auth', (route) => false);
+              _AdminNavbar(onLogout: () async {
+                await FirebaseAuth.instance.signOut();
+                if (mounted) {
+                  Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
+                }
               }),
 
               Expanded(
@@ -119,7 +145,7 @@ class _AdminNavbar extends StatelessWidget {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              // LEFT: LOGO WITH SMOKE ANIMATION
+              // LEFT: LOGO
               Row(
                 children: [
                   Stack(
@@ -159,7 +185,7 @@ class _AdminNavbar extends StatelessWidget {
                 ],
               ),
 
-              // RIGHT: BEAUTIFUL LOGOUT BUTTON
+              // RIGHT: LOGOUT BUTTON
               InkWell(
                 onTap: onLogout,
                 borderRadius: BorderRadius.circular(30),
@@ -283,8 +309,10 @@ class _ApplicationCard extends StatelessWidget {
   final Map<String, dynamic> data;
   const _ApplicationCard({required this.data});
 
-  // --- NEW: WEB-SPECIFIC DOWNLOADER ---
-  void _downloadDoc(BuildContext context, String? url, String filename) {
+  // ---------------------------------------------------------------------------
+  // UPDATED: VIEW IN NEW TAB
+  // ---------------------------------------------------------------------------
+  void _viewDoc(BuildContext context, String? url) {
     if (url == null || url.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("No document link found."), backgroundColor: Colors.redAccent),
@@ -293,27 +321,23 @@ class _ApplicationCard extends StatelessWidget {
     }
 
     try {
-      // 1. Create a standard HTML anchor element
-      html.AnchorElement anchorElement = html.AnchorElement(href: url);
+      // 1. Create standard HTML anchor
+      final html.AnchorElement anchor = html.AnchorElement(href: url);
       
-      // 2. Set the download attribute (Force download)
-      anchorElement.download = filename;
+      // 2. Set target to _blank (Opens in new tab)
+      anchor.target = "_blank";
       
-      // 3. Set target to blank (Opens in new tab as fallback)
-      anchorElement.target = '_blank';
-      
-      // 4. Programmatically click it
-      anchorElement.click();
+      // 3. Trigger Click
+      anchor.click();
       
     } catch (e) {
-      debugPrint("Download error: $e");
+      debugPrint("View error: $e");
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Could not initiate download."), backgroundColor: Colors.redAccent),
+        const SnackBar(content: Text("Error opening document."), backgroundColor: Colors.redAccent),
       );
     }
   }
 
-  // Helper: Format Timestamp without intl package
   String _formatTimestamp(Timestamp? timestamp) {
     if (timestamp == null) return "Date Unknown";
     DateTime d = timestamp.toDate();
@@ -326,7 +350,6 @@ class _ApplicationCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Data Extraction
     final String fullName = "${data['firstName'] ?? ''} ${data['lastName'] ?? ''}";
     final String role = data['role'] ?? 'Unknown Role';
     final String email = data['email'] ?? 'No Email';
@@ -340,7 +363,7 @@ class _ApplicationCard extends StatelessWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFF0F172A).withOpacity(0.6), // Glass effect
+        color: const Color(0xFF0F172A).withOpacity(0.6),
         borderRadius: BorderRadius.circular(24),
         border: Border.all(color: Colors.white.withOpacity(0.08)),
         boxShadow: [
@@ -415,19 +438,19 @@ class _ApplicationCard extends StatelessWidget {
                   children: [
                     Expanded(
                       child: _DocButton(
-                        label: "Download Resume", 
-                        icon: Icons.download_rounded, 
+                        label: "View Resume", 
+                        icon: Icons.visibility_rounded, // Changed Icon
                         color: const Color(0xFFEC4899), 
-                        onTap: () => _downloadDoc(context, resumeUrl, "Resume_$fullName"),
+                        onTap: () => _viewDoc(context, resumeUrl),
                       ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: _DocButton(
-                        label: "Download Transcripts", 
-                        icon: Icons.download_rounded, 
+                        label: "View Transcripts", 
+                        icon: Icons.visibility_rounded, // Changed Icon
                         color: Colors.cyanAccent, 
-                        onTap: () => _downloadDoc(context, suppUrl, "Transcript_$fullName"),
+                        onTap: () => _viewDoc(context, suppUrl),
                       ),
                     ),
                   ],
