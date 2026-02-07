@@ -192,8 +192,7 @@ class _HeroSection extends StatelessWidget {
                     text: "Hire Annotators",
                     icon: Icons.business_center,
                     onPressed: () {
-                      // UPDATED: Navigates to Careers Page
-                      Navigator.pushNamed(context, '/careers');
+                      // LINK REMOVED per request
                     },
                     color: const Color(0xFF6366F1), // Indigo
                   ),
