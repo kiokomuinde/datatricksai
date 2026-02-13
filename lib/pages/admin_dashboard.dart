@@ -19,6 +19,9 @@ class AdminDashboard extends StatefulWidget {
 
 class _AdminDashboardState extends State<AdminDashboard> with TickerProviderStateMixin {
   
+  // SELECTION STATE
+  final Set<String> _selectedIds = {};
+
   @override
   void initState() {
     super.initState();
@@ -32,6 +35,95 @@ class _AdminDashboardState extends State<AdminDashboard> with TickerProviderStat
         Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
       }
     });
+  }
+
+  // TOGGLE SELECTION FOR SINGLE ITEM
+  void _toggleSelection(String docId) {
+    setState(() {
+      if (_selectedIds.contains(docId)) {
+        _selectedIds.remove(docId);
+      } else {
+        _selectedIds.add(docId);
+      }
+    });
+  }
+
+  // TOGGLE SELECT ALL
+  void _toggleSelectAll(List<QueryDocumentSnapshot> docs) {
+    setState(() {
+      if (_selectedIds.length == docs.length && docs.isNotEmpty) {
+        // If all are currently selected, deselect all
+        _selectedIds.clear();
+      } else {
+        // Otherwise, select all
+        _selectedIds.clear();
+        for (var doc in docs) {
+          _selectedIds.add(doc.id);
+        }
+      }
+    });
+  }
+
+  // DELETE SINGLE RECORD
+  Future<void> _deleteRecord(String docId) async {
+    bool confirm = await _showDeleteConfirmDialog("Delete this application?");
+    if (confirm) {
+      await FirebaseFirestore.instance.collection('applications').doc(docId).delete();
+      if (mounted) {
+        setState(() {
+          _selectedIds.remove(docId);
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Record deleted"), backgroundColor: Colors.redAccent),
+        );
+      }
+    }
+  }
+
+  // DELETE SELECTED RECORDS
+  Future<void> _deleteSelectedRecords() async {
+    if (_selectedIds.isEmpty) return;
+
+    bool confirm = await _showDeleteConfirmDialog("Delete ${_selectedIds.length} selected records?");
+    if (confirm) {
+      final batch = FirebaseFirestore.instance.batch();
+      for (final id in _selectedIds) {
+        batch.delete(FirebaseFirestore.instance.collection('applications').doc(id));
+      }
+      
+      await batch.commit();
+
+      if (mounted) {
+        setState(() {
+          _selectedIds.clear();
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Selected records deleted"), backgroundColor: Colors.redAccent),
+        );
+      }
+    }
+  }
+
+  Future<bool> _showDeleteConfirmDialog(String title) async {
+    return await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF0F172A),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: Colors.white.withOpacity(0.1))),
+        title: Text(title, style: const TextStyle(color: Colors.white)),
+        content: const Text("This action cannot be undone.", style: TextStyle(color: Colors.white70)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text("Cancel", style: TextStyle(color: Colors.white54)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text("Delete", style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    ) ?? false;
   }
 
   @override
@@ -50,34 +142,47 @@ class _AdminDashboardState extends State<AdminDashboard> with TickerProviderStat
           // Background Painter
           const _BackgroundCanvas(),
 
-          Column(
-            children: [
-              // NAVBAR
-              _AdminNavbar(onLogout: () async {
-                await FirebaseAuth.instance.signOut();
-                if (mounted) {
-                  Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
-                }
-              }),
+          // MAIN CONTENT WRAPPED IN STREAM BUILDER
+          // Moving this up allows the Navbar to know about the data for "Select All"
+          StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance
+                .collection('applications')
+                .orderBy('appliedAt', descending: true)
+                .snapshots(),
+            builder: (context, snapshot) {
+              // LOADING STATE
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator(color: Color(0xFF6366F1)));
+              }
 
-              Expanded(
-                child: StreamBuilder<QuerySnapshot>(
-                  stream: FirebaseFirestore.instance
-                      .collection('applications')
-                      .orderBy('appliedAt', descending: true)
-                      .snapshots(),
-                  builder: (context, snapshot) {
-                    if (snapshot.hasError) {
-                      return Center(child: Text('Error: ${snapshot.error}', style: const TextStyle(color: Colors.redAccent)));
+              // ERROR STATE
+              if (snapshot.hasError) {
+                return Center(child: Text('Error: ${snapshot.error}', style: const TextStyle(color: Colors.redAccent)));
+              }
+
+              final docs = snapshot.data!.docs;
+              final bool isAllSelected = docs.isNotEmpty && _selectedIds.length == docs.length;
+
+              return Column(
+                children: [
+                  // NAVBAR (Now has access to docs for Select All logic)
+                  _AdminNavbar(
+                    selectedCount: _selectedIds.length,
+                    totalDocs: docs.length,
+                    isAllSelected: isAllSelected,
+                    onSelectAll: () => _toggleSelectAll(docs),
+                    onDeleteSelected: _deleteSelectedRecords,
+                    onLogout: () async {
+                      await FirebaseAuth.instance.signOut();
+                      if (mounted) {
+                        Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
+                      }
                     }
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return const Center(child: CircularProgressIndicator(color: Color(0xFF6366F1)));
-                    }
+                  ),
 
-                    final docs = snapshot.data!.docs;
-
-                    if (docs.isEmpty) {
-                      return Center(
+                  Expanded(
+                    child: docs.isEmpty 
+                    ? Center(
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
@@ -86,34 +191,41 @@ class _AdminDashboardState extends State<AdminDashboard> with TickerProviderStat
                             const Text("No applications received yet.", style: TextStyle(color: Colors.white54)),
                           ],
                         ),
-                      );
-                    }
+                      )
+                    : LayoutBuilder(
+                        builder: (context, constraints) {
+                          int crossAxisCount = constraints.maxWidth > 1100 ? 3 : (constraints.maxWidth > 700 ? 2 : 1);
+                          
+                          return GridView.builder(
+                            padding: const EdgeInsets.all(30),
+                            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: crossAxisCount,
+                              crossAxisSpacing: 25,
+                              mainAxisSpacing: 25,
+                              childAspectRatio: 0.85, 
+                            ),
+                            itemCount: docs.length,
+                            itemBuilder: (context, index) {
+                              final doc = docs[index];
+                              final data = doc.data() as Map<String, dynamic>;
+                              final docId = doc.id;
+                              final isSelected = _selectedIds.contains(docId);
 
-                    // Responsive Grid Layout
-                    return LayoutBuilder(
-                      builder: (context, constraints) {
-                        int crossAxisCount = constraints.maxWidth > 1100 ? 3 : (constraints.maxWidth > 700 ? 2 : 1);
-                        
-                        return GridView.builder(
-                          padding: const EdgeInsets.all(30),
-                          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: crossAxisCount,
-                            crossAxisSpacing: 25,
-                            mainAxisSpacing: 25,
-                            childAspectRatio: 0.85, 
-                          ),
-                          itemCount: docs.length,
-                          itemBuilder: (context, index) {
-                            final data = docs[index].data() as Map<String, dynamic>;
-                            return _ApplicationCard(data: data);
-                          },
-                        );
-                      },
-                    );
-                  },
-                ),
-              ),
-            ],
+                              return _ApplicationCard(
+                                data: data,
+                                docId: docId,
+                                isSelected: isSelected,
+                                onSelect: () => _toggleSelection(docId),
+                                onDelete: () => _deleteRecord(docId),
+                              );
+                            },
+                          );
+                        },
+                      ),
+                  ),
+                ],
+              );
+            },
           ),
         ],
       ),
@@ -122,13 +234,25 @@ class _AdminDashboardState extends State<AdminDashboard> with TickerProviderStat
 }
 
 // ===========================================================================
-// ADMIN NAVBAR
+// ADMIN NAVBAR (UPDATED)
 // ===========================================================================
 
 class _AdminNavbar extends StatelessWidget {
   final VoidCallback onLogout;
+  final VoidCallback onDeleteSelected;
+  final VoidCallback onSelectAll;
+  final int selectedCount;
+  final int totalDocs;
+  final bool isAllSelected;
 
-  const _AdminNavbar({required this.onLogout});
+  const _AdminNavbar({
+    required this.onLogout,
+    required this.onDeleteSelected,
+    required this.onSelectAll,
+    required this.selectedCount,
+    required this.totalDocs,
+    required this.isAllSelected,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -185,28 +309,97 @@ class _AdminNavbar extends StatelessWidget {
                 ],
               ),
 
-              // RIGHT: LOGOUT BUTTON
-              InkWell(
-                onTap: onLogout,
-                borderRadius: BorderRadius.circular(30),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.03),
+              // RIGHT: ACTIONS
+              Row(
+                children: [
+                  // SELECT ALL BUTTON (Visible if there are docs)
+                  if (totalDocs > 0) ...[
+                    InkWell(
+                      onTap: onSelectAll,
+                      borderRadius: BorderRadius.circular(30),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                        decoration: BoxDecoration(
+                          color: isAllSelected ? const Color(0xFF6366F1).withOpacity(0.1) : Colors.white.withOpacity(0.05),
+                          borderRadius: BorderRadius.circular(30),
+                          border: Border.all(
+                            color: isAllSelected ? const Color(0xFF6366F1) : Colors.white.withOpacity(0.2)
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              isAllSelected ? Icons.check_box : Icons.check_box_outline_blank, 
+                              color: isAllSelected ? const Color(0xFF6366F1) : Colors.white70, 
+                              size: 20
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              isAllSelected ? "Deselect All" : "Select All", 
+                              style: TextStyle(
+                                color: isAllSelected ? const Color(0xFF6366F1) : Colors.white70, 
+                                fontWeight: FontWeight.bold, 
+                                fontSize: 14
+                              )
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 20),
+                  ],
+
+                  // DELETE SELECTED BUTTON (Visible only if items selected)
+                  if (selectedCount > 0) ...[
+                    InkWell(
+                      onTap: onDeleteSelected,
+                      borderRadius: BorderRadius.circular(30),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                        decoration: BoxDecoration(
+                          color: Colors.redAccent.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(30),
+                          border: Border.all(color: Colors.redAccent.withOpacity(0.5)),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.delete_sweep_rounded, color: Colors.redAccent, size: 20),
+                            const SizedBox(width: 8),
+                            Text(
+                              "Delete ($selectedCount)", 
+                              style: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold, fontSize: 14)
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 20),
+                  ],
+
+                  // LOGOUT BUTTON
+                  InkWell(
+                    onTap: onLogout,
                     borderRadius: BorderRadius.circular(30),
-                    border: Border.all(color: Colors.redAccent.withOpacity(0.3)),
-                    boxShadow: [
-                      BoxShadow(color: Colors.redAccent.withOpacity(0.1), blurRadius: 10, spreadRadius: -2)
-                    ],
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.03),
+                        borderRadius: BorderRadius.circular(30),
+                        border: Border.all(color: Colors.redAccent.withOpacity(0.3)),
+                        boxShadow: [
+                          BoxShadow(color: Colors.redAccent.withOpacity(0.1), blurRadius: 10, spreadRadius: -2)
+                        ],
+                      ),
+                      child: Row(
+                        children: const [
+                          Text("Log Out", style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14)),
+                          SizedBox(width: 10),
+                          Icon(Icons.logout_rounded, color: Colors.redAccent, size: 18),
+                        ],
+                      ),
+                    ),
                   ),
-                  child: Row(
-                    children: const [
-                      Text("Log Out", style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14)),
-                      SizedBox(width: 10),
-                      Icon(Icons.logout_rounded, color: Colors.redAccent, size: 18),
-                    ],
-                  ),
-                ),
+                ],
               )
             ],
           ),
@@ -217,7 +410,7 @@ class _AdminNavbar extends StatelessWidget {
 }
 
 // ===========================================================================
-// ANIMATION LOGIC
+// ANIMATION LOGIC (UNCHANGED)
 // ===========================================================================
 
 class _SmokeEffect extends StatefulWidget {
@@ -307,10 +500,21 @@ class _SmokePainter extends CustomPainter {
 
 class _ApplicationCard extends StatelessWidget {
   final Map<String, dynamic> data;
-  const _ApplicationCard({required this.data});
+  final String docId;
+  final bool isSelected;
+  final VoidCallback onSelect;
+  final VoidCallback onDelete;
+
+  const _ApplicationCard({
+    required this.data, 
+    required this.docId,
+    required this.isSelected,
+    required this.onSelect,
+    required this.onDelete,
+  });
 
   // ---------------------------------------------------------------------------
-  // UPDATED: VIEW IN NEW TAB
+  // VIEW IN NEW TAB
   // ---------------------------------------------------------------------------
   void _viewDoc(BuildContext context, String? url) {
     if (url == null || url.isEmpty) {
@@ -321,15 +525,9 @@ class _ApplicationCard extends StatelessWidget {
     }
 
     try {
-      // 1. Create standard HTML anchor
       final html.AnchorElement anchor = html.AnchorElement(href: url);
-      
-      // 2. Set target to _blank (Opens in new tab)
       anchor.target = "_blank";
-      
-      // 3. Trigger Click
       anchor.click();
-      
     } catch (e) {
       debugPrint("View error: $e");
       ScaffoldMessenger.of(context).showSnackBar(
@@ -363,9 +561,14 @@ class _ApplicationCard extends StatelessWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFF0F172A).withOpacity(0.6),
+        color: isSelected 
+            ? const Color(0xFF6366F1).withOpacity(0.15) // Highlight if selected
+            : const Color(0xFF0F172A).withOpacity(0.6),
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: Colors.white.withOpacity(0.08)),
+        border: Border.all(
+          color: isSelected ? const Color(0xFF6366F1) : Colors.white.withOpacity(0.08),
+          width: isSelected ? 2 : 1,
+        ),
         boxShadow: [
           BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 20, offset: const Offset(0, 10))
         ],
@@ -379,10 +582,27 @@ class _ApplicationCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // CARD HEADER
+                // CARD HEADER: Checkbox - Role - Status - Delete
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
+                    // CHECKBOX (Custom Selection Circle)
+                    InkWell(
+                      onTap: onSelect,
+                      child: Container(
+                        margin: const EdgeInsets.only(right: 10),
+                        width: 20, height: 20,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: isSelected ? const Color(0xFF6366F1) : Colors.transparent,
+                          border: Border.all(
+                            color: isSelected ? const Color(0xFF6366F1) : Colors.white54, 
+                            width: 2
+                          ),
+                        ),
+                        child: isSelected ? const Icon(Icons.check, size: 14, color: Colors.white) : null,
+                      ),
+                    ),
+
                     Expanded(
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -394,9 +614,20 @@ class _ApplicationCard extends StatelessWidget {
                         ),
                       ),
                     ),
+                    const SizedBox(width: 8),
                     Container(
                       height: 8, width: 8, 
                       decoration: const BoxDecoration(color: Colors.greenAccent, shape: BoxShape.circle, boxShadow: [BoxShadow(color: Colors.greenAccent, blurRadius: 5)])
+                    ),
+                    const SizedBox(width: 8),
+                    // INDIVIDUAL DELETE ICON
+                    InkWell(
+                      onTap: onDelete,
+                      borderRadius: BorderRadius.circular(20),
+                      child: const Padding(
+                        padding: EdgeInsets.all(4.0),
+                        child: Icon(Icons.delete_outline_rounded, color: Colors.white24, size: 20),
+                      ),
                     ),
                   ],
                 ),
@@ -439,7 +670,7 @@ class _ApplicationCard extends StatelessWidget {
                     Expanded(
                       child: _DocButton(
                         label: "View Resume", 
-                        icon: Icons.visibility_rounded, // Changed Icon
+                        icon: Icons.visibility_rounded, 
                         color: const Color(0xFFEC4899), 
                         onTap: () => _viewDoc(context, resumeUrl),
                       ),
@@ -448,7 +679,7 @@ class _ApplicationCard extends StatelessWidget {
                     Expanded(
                       child: _DocButton(
                         label: "View Transcripts", 
-                        icon: Icons.visibility_rounded, // Changed Icon
+                        icon: Icons.visibility_rounded, 
                         color: Colors.cyanAccent, 
                         onTap: () => _viewDoc(context, suppUrl),
                       ),
