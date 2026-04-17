@@ -1,11 +1,13 @@
 import 'dart:convert';
 import 'dart:ui';
 // ignore: avoid_web_libraries_in_flutter
-import 'dart:typed_data'; // REQUIRED: For handling file bytes across Web & Mobile
+import 'dart:typed_data'; 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; 
 import 'package:file_picker/file_picker.dart';
-import 'package:http/http.dart' as http; // FOR CLOUDINARY UPLOAD
-import 'package:cloud_firestore/cloud_firestore.dart'; // FOR DATA STORAGE
+import 'package:http/http.dart' as http; 
+import 'package:cloud_firestore/cloud_firestore.dart'; 
+import 'package:share_plus/share_plus.dart'; 
 
 // ===========================================================================
 // DATATRICKS AI - CAREERS & APPLICATION PAGE
@@ -24,39 +26,30 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
   
   // --- CLOUDINARY CONFIGURATION (FILL THESE IN) ---
   final String _cloudName = "dgdnli7vh"; 
-  final String _uploadPreset = "resumes_careers"; // MUST BE 'UNSIGNED' & 'PUBLIC' IN CLOUDINARY
+  final String _uploadPreset = "resumes_careers"; 
   // ------------------------------------------------
 
-  // Form Controllers
   final _firstNameController = TextEditingController();
   final _lastNameController = TextEditingController();
   final _emailController = TextEditingController();
   final _phoneController = TextEditingController();
   final _zipController = TextEditingController();
   final _linkedinController = TextEditingController();
-  
-  // Controller for "Other" source
   final _otherSourceController = TextEditingController(); 
-  
-  // Controller for High School
   final _highSchoolController = TextEditingController();
 
-  // DROPDOWN STATE
   String? _selectedRole;
   String? _selectedSource;
   
-  // LOCATION STATE
   String? _selectedState;
   String? _selectedCity;
   List<String> _cities = [];
   bool _isLoadingCities = false;
 
-  // File Upload State (Resume)
   PlatformFile? _resumeFile;
   Uint8List? _resumeBytes; 
   String? _fileError; 
 
-  // File Upload State (Supporting Documents)
   PlatformFile? _suppFile;
   Uint8List? _suppBytes;
   String? _suppFileError;
@@ -148,16 +141,57 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
   ];
 
   final Map<String, List<String>> _usaStates = {
-    "California": ["Los Angeles", "San Francisco", "San Diego", "San Jose"],
-    "New York": ["New York City", "Buffalo", "Albany", "Rochester"],
-    "Texas": ["Houston", "Austin", "Dallas", "San Antonio"],
+    "Alabama": ["Birmingham", "Montgomery", "Huntsville", "Mobile"],
+    "Alaska": ["Anchorage", "Fairbanks", "Juneau", "Sitka"],
+    "Arizona": ["Phoenix", "Tucson", "Mesa", "Chandler"],
+    "Arkansas": ["Little Rock", "Fort Smith", "Fayetteville", "Springdale"],
+    "California": ["Los Angeles", "San Francisco", "San Diego", "Sacramento", "San Jose"],
+    "Colorado": ["Denver", "Colorado Springs", "Aurora", "Fort Collins"],
+    "Connecticut": ["Bridgeport", "New Haven", "Stamford", "Hartford"],
+    "Delaware": ["Wilmington", "Dover", "Newark", "Middletown"],
     "Florida": ["Miami", "Orlando", "Tampa", "Jacksonville"],
-    "Washington": ["Seattle", "Spokane", "Tacoma", "Bellevue"],
+    "Georgia": ["Atlanta", "Augusta", "Columbus", "Savannah"],
+    "Hawaii": ["Honolulu", "Pearl City", "Hilo", "Kailua"],
+    "Idaho": ["Boise", "Meridian", "Nampa", "Idaho Falls"],
+    "Illinois": ["Chicago", "Aurora", "Joliet", "Naperville"],
+    "Indiana": ["Indianapolis", "Fort Wayne", "Evansville", "South Bend"],
+    "Iowa": ["Des Moines", "Cedar Rapids", "Davenport", "Sioux City"],
+    "Kansas": ["Wichita", "Overland Park", "Kansas City", "Olathe"],
+    "Kentucky": ["Louisville", "Lexington", "Bowling Green", "Owensboro"],
+    "Louisiana": ["New Orleans", "Baton Rouge", "Shreveport", "Lafayette"],
+    "Maine": ["Portland", "Lewiston", "Bangor", "South Portland"],
+    "Maryland": ["Baltimore", "Columbia", "Germantown", "Silver Spring"],
+    "Massachusetts": ["Boston", "Worcester", "Springfield", "Cambridge"],
+    "Michigan": ["Detroit", "Grand Rapids", "Warren", "Sterling Heights"],
+    "Minnesota": ["Minneapolis", "St. Paul", "Rochester", "Duluth"],
+    "Mississippi": ["Jackson", "Gulfport", "Southaven", "Hattiesburg"],
+    "Missouri": ["Kansas City", "St. Louis", "Springfield", "Columbia"],
+    "Montana": ["Billings", "Missoula", "Great Falls", "Bozeman"],
+    "Nebraska": ["Omaha", "Lincoln", "Bellevue", "Grand Island"],
+    "Nevada": ["Las Vegas", "Henderson", "Reno", "North Las Vegas"],
+    "New Hampshire": ["Manchester", "Nashua", "Concord", "Derry"],
+    "New Jersey": ["Newark", "Jersey City", "Paterson", "Elizabeth"],
+    "New Mexico": ["Albuquerque", "Las Cruces", "Rio Rancho", "Santa Fe"],
+    "New York": ["New York City", "Buffalo", "Rochester", "Yonkers", "Syracuse"],
+    "North Carolina": ["Charlotte", "Raleigh", "Greensboro", "Durham"],
+    "North Dakota": ["Fargo", "Bismarck", "Grand Forks", "Minot"],
+    "Ohio": ["Columbus", "Cleveland", "Cincinnati", "Toledo"],
+    "Oklahoma": ["Oklahoma City", "Tulsa", "Norman", "Broken Arrow"],
+    "Oregon": ["Portland", "Salem", "Eugene", "Gresham"],
+    "Pennsylvania": ["Philadelphia", "Pittsburgh", "Allentown", "Erie"],
+    "Rhode Island": ["Providence", "Warwick", "Cranston", "Pawtucket"],
+    "South Carolina": ["Charleston", "Columbia", "North Charleston", "Mount Pleasant"],
+    "South Dakota": ["Sioux Falls", "Rapid City", "Aberdeen", "Brookings"],
+    "Tennessee": ["Nashville", "Memphis", "Knoxville", "Chattanooga"],
+    "Texas": ["Houston", "San Antonio", "Dallas", "Austin", "Fort Worth"],
+    "Utah": ["Salt Lake City", "West Valley City", "Provo", "West Jordan"],
+    "Vermont": ["Burlington", "South Burlington", "Rutland", "Barre"],
+    "Virginia": ["Virginia Beach", "Norfolk", "Chesapeake", "Richmond"],
+    "Washington": ["Seattle", "Spokane", "Tacoma", "Vancouver", "Bellevue"],
+    "West Virginia": ["Charleston", "Huntington", "Morgantown", "Parkersburg"],
+    "Wisconsin": ["Milwaukee", "Madison", "Green Bay", "Kenosha"],
+    "Wyoming": ["Cheyenne", "Casper", "Laramie", "Gillette"]
   };
-
-  // ---------------------------------------------------------------------------
-  // ACTIONS
-  // ---------------------------------------------------------------------------
 
   void _goHome() {
     Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
@@ -184,7 +218,6 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
   Future<void> _pickResume() async {
     try {
       setState(() => _fileError = null);
-
       FilePickerResult? result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['pdf', 'doc', 'docx'],
@@ -203,11 +236,9 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
     }
   }
 
-  // Action to pick Supporting Document (Transcripts)
   Future<void> _pickSuppFile() async {
     try {
       setState(() => _suppFileError = null);
-
       FilePickerResult? result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['pdf', 'doc', 'docx', 'jpg', 'png'], 
@@ -227,7 +258,6 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
   }
 
   void _submitApplication() {
-    // 1. Validation
     setState(() {
       _fileError = null;
       _suppFileError = null;
@@ -237,13 +267,11 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
     bool isResumeValid = true;
     bool isSuppValid = true;
     
-    // Validate Resume
     if (_resumeFile == null || _resumeBytes == null) {
       setState(() => _fileError = "Resume is required (PDF or DOCX)");
       isResumeValid = false;
     }
 
-    // Validate Supporting Document (Transcripts)
     if (_suppFile == null || _suppBytes == null) {
       setState(() => _suppFileError = "High School Transcripts are required");
       isSuppValid = false;
@@ -251,13 +279,11 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
 
     if (!isFormValid || !isResumeValid || !isSuppValid) return;
 
-    // 2. PREPARE DATA
     String finalSource = _selectedSource ?? "";
     if (_selectedSource == "Other") {
       finalSource = "Other: ${_otherSourceController.text.trim()}";
     }
 
-    // 3. NAVIGATE TO WAITING PAGE
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -341,7 +367,6 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
                             ]),
                             const SizedBox(height: 40),
 
-                            // --- EDUCATION SECTION ---
                             _SectionHeader("Education"),
                             const SizedBox(height: 20),
                             _NeonInput(label: "High School Name", controller: _highSchoolController, icon: Icons.school),
@@ -376,7 +401,6 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
                             _SectionHeader("Resume / CV"),
                             const SizedBox(height: 15),
                             
-                            // RESUME UPLOAD WIDGET
                             InkWell(
                               onTap: _pickResume,
                               borderRadius: BorderRadius.circular(12),
@@ -419,7 +443,6 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
 
                             const SizedBox(height: 40),
 
-                            // --- SUPPORTING DOCUMENTS (TRANSCRIPTS) SECTION ---
                             _SectionHeader("Supporting Documents (Transcripts)"),
                             const SizedBox(height: 15),
                             
@@ -519,7 +542,6 @@ class _WaitingPageState extends State<WaitingPage> {
 
   Future<void> _processApplication() async {
     try {
-      // 1. CHECK FOR DUPLICATES (Use Email as Unique ID)
       final QuerySnapshot duplicateCheck = await FirebaseFirestore.instance
           .collection('applications')
           .where('email', isEqualTo: widget.formData['email'])
@@ -530,19 +552,16 @@ class _WaitingPageState extends State<WaitingPage> {
         throw Exception("An application with this email already exists.");
       }
 
-      // 2. Upload Resume to Cloudinary
       String? resumeUrl = await _uploadToCloudinary(widget.resumeBytes, widget.formData['resumeName']);
       if (resumeUrl == null) {
         throw Exception("Failed to upload resume. Please try again.");
       }
 
-      // 3. Upload Supporting Document (Transcripts) to Cloudinary
       String? suppUrl = await _uploadToCloudinary(widget.suppBytes, widget.formData['suppDocName']);
       if (suppUrl == null) {
         throw Exception("Failed to upload supporting document. Please try again.");
       }
 
-      // 4. Save Data to Firestore 
       await FirebaseFirestore.instance.collection('applications').add({
         'firstName': widget.formData['firstName'],
         'lastName': widget.formData['lastName'],
@@ -565,7 +584,6 @@ class _WaitingPageState extends State<WaitingPage> {
         'status': 'pending',
       });
 
-      // 5. SUCCESS -> Navigate to Success Page
       if (mounted) {
         Navigator.pushReplacement(
           context,
@@ -574,7 +592,6 @@ class _WaitingPageState extends State<WaitingPage> {
       }
 
     } catch (e) {
-      // 6. ERROR -> Go back
       if (mounted) {
         String errorMessage = e.toString().replaceAll("Exception: ", "");
         debugPrint("Application Process Error: $e");
@@ -613,13 +630,11 @@ class _WaitingPageState extends State<WaitingPage> {
 
   Future<String?> _uploadToCloudinary(Uint8List fileBytes, String fileName) async {
     try {
-      // IMPORTANT: Use the 'auto' endpoint so Cloudinary detects PDF/Image/Raw correctly.
       var uri = Uri.parse("https://api.cloudinary.com/v1_1/${widget.cloudName}/auto/upload");
       var request = http.MultipartRequest("POST", uri);
 
       request.fields['upload_preset'] = widget.uploadPreset;
       
-      // Sending file bytes with filename is crucial for Cloudinary to detect extension
       request.files.add(http.MultipartFile.fromBytes(
         'file', 
         fileBytes, 
@@ -632,18 +647,11 @@ class _WaitingPageState extends State<WaitingPage> {
         var responseData = await response.stream.toBytes();
         var responseString = String.fromCharCodes(responseData);
         var jsonMap = jsonDecode(responseString);
-        
-        // This 'secure_url' will now correspond to the correct resource type (image or raw)
         return jsonMap['secure_url']; 
       } else {
-        debugPrint("Cloudinary Upload Failed: ${response.statusCode}");
-        // Optional: Read response body for specific error message from Cloudinary
-        // var responseData = await response.stream.toBytes();
-        // debugPrint(String.fromCharCodes(responseData));
         return null;
       }
     } catch (e) {
-      debugPrint("Cloudinary Exception: $e");
       return null;
     }
   }
@@ -769,9 +777,106 @@ class ApplicationSuccessPage extends StatelessWidget {
 class _Navbar extends StatelessWidget {
   final VoidCallback onHomeTap;
   const _Navbar({required this.onHomeTap});
+
+  void _showShareOptions(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF0F172A),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: BorderSide(color: Colors.white.withOpacity(0.1))
+        ),
+        title: const Row(
+          children: [
+            Icon(Icons.share, color: Color(0xFF6366F1)),
+            SizedBox(width: 10),
+            Text("Share Careers Form", style: TextStyle(color: Colors.white)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.copy, color: Colors.white70),
+              title: const Text("Copy Link", style: TextStyle(color: Colors.white)),
+              onTap: () {
+                // Updated URL to target the careers route specifically
+                Clipboard.setData(const ClipboardData(text: "https://datatricksai.us/careers"));
+                Navigator.pop(ctx);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: const Text("Link copied to clipboard!", style: TextStyle(fontWeight: FontWeight.bold)),
+                    backgroundColor: const Color(0xFF6366F1),
+                    behavior: SnackBarBehavior.floating,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  )
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.share_outlined, color: Colors.white70),
+              title: const Text("Share via...", style: TextStyle(color: Colors.white)),
+              onTap: () {
+                Navigator.pop(ctx);
+                Share.share(
+                  // Updated URL to target the careers route specifically
+                  'Apply for AI roles using the DataTricks AI Careers Form: https://datatricksai.us/careers',
+                  subject: 'DataTricks AI Careers Form'
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(child: BackdropFilter(filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10), child: Container(height: 80, padding: const EdgeInsets.symmetric(horizontal: 40), decoration: BoxDecoration(border: Border(bottom: BorderSide(color: Colors.white.withOpacity(0.05))), color: Colors.black.withOpacity(0.2)), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [InkWell(onTap: onHomeTap, child: Row(children: [Image.asset('assets/images/logo.png', height: 40, errorBuilder: (c,e,s) => const Icon(Icons.rocket, color: Colors.white)), const SizedBox(width: 15), const Text("DATATRICKS AI", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20))])), TextButton.icon(onPressed: onHomeTap, icon: const Icon(Icons.arrow_back, color: Colors.white54, size: 18), label: const Text("Return Home", style: TextStyle(color: Colors.white54)))]))));
+    return ClipRRect(
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10), 
+        child: Container(
+          height: 80, 
+          padding: const EdgeInsets.symmetric(horizontal: 40), 
+          decoration: BoxDecoration(
+            border: Border(bottom: BorderSide(color: Colors.white.withOpacity(0.05))), 
+            color: Colors.black.withOpacity(0.2)
+          ), 
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween, 
+            children: [
+              InkWell(
+                onTap: onHomeTap, 
+                child: Row(
+                  children: [
+                    Image.asset('assets/images/logo.png', height: 40, errorBuilder: (c,e,s) => const Icon(Icons.rocket, color: Colors.white)), 
+                    const SizedBox(width: 15), 
+                    const Text("DATATRICKS AI", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20))
+                  ]
+                )
+              ), 
+              Row(
+                children: [
+                  TextButton.icon(
+                    onPressed: () => _showShareOptions(context), 
+                    icon: const Icon(Icons.share, color: Colors.white54, size: 18), 
+                    label: const Text("Share", style: TextStyle(color: Colors.white54))
+                  ),
+                  const SizedBox(width: 20),
+                  TextButton.icon(
+                    onPressed: onHomeTap, 
+                    icon: const Icon(Icons.arrow_back, color: Colors.white54, size: 18), 
+                    label: const Text("Return Home", style: TextStyle(color: Colors.white54))
+                  )
+                ]
+              )
+            ]
+          )
+        )
+      )
+    );
   }
 }
 
