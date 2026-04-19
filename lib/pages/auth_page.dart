@@ -2,12 +2,18 @@ import 'dart:math' as math;
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
-// Ensure this matches your file structure
 import 'package:datatricksai/services/auth_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 // ===========================================================================
 // DATATRICKS AI - AUTHENTICATION PAGE
+// ===========================================================================
+// SIGN IN  → looks up email in Firestore applications → goes to /dashboard
+// SIGN UP  → verifies email + tempPassword match in Firestore applications
+//            → creates Firebase Auth account → goes to /dashboard
+// ADMIN    → password "Proverbs16:9" → goes to /admin
+// GOOGLE   → goes to /careers (new applicants)
 // ===========================================================================
 
 class AuthPage extends StatefulWidget {
@@ -18,131 +24,257 @@ class AuthPage extends StatefulWidget {
 }
 
 class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
-  final AuthService _authService = AuthService(); // Firebase Service
-  final _formKey = GlobalKey<FormState>(); // Key for Form Validation
-  
-  bool _isLogin = true; // Toggle between Sign In and Sign Up
-  bool _isLoading = false; // Loading Spinner State
-  
-  // GLOBAL API ERROR STATE (For Firebase errors like "User not found")
+  final AuthService _authService = AuthService();
+  final _formKey = GlobalKey<FormState>();
+
+  bool _isLogin = true;
+  bool _isLoading = false;
   String? _apiErrorMessage;
 
-  // Form Controllers
   final _emailController = TextEditingController();
-  final _passController = TextEditingController();
-  final _nameController = TextEditingController();
+  final _passController  = TextEditingController();
+  final _nameController  = TextEditingController();
 
   void _toggleAuthMode() {
     setState(() {
       _isLogin = !_isLogin;
-      _apiErrorMessage = null; // Clear global errors
-      _formKey.currentState?.reset(); // Clear field errors
+      _apiErrorMessage = null;
+      _formKey.currentState?.reset();
     });
   }
 
-  // --- UPDATED: GOOGLE SIGN IN (ALWAYS APPLICANT) ---
+  // ── GOOGLE SIGN IN (always → /careers) ───────────────────────────────────
   Future<void> _handleGoogleSignIn() async {
-    setState(() {
-      _isLoading = true;
-      _apiErrorMessage = null;
-    });
-
+    setState(() { _isLoading = true; _apiErrorMessage = null; });
     try {
-      // 1. Trigger Google Sign In
       User? user = await _authService.signInWithGoogle();
-      
-      // 2. Lock In: Google users are always 'applicant'
       if (user != null) {
         await _authService.syncUserRole(user, role: 'applicant');
-        
-        // 3. Navigate
         if (mounted) {
-           Navigator.pushNamedAndRemoveUntil(context, '/careers', (route) => false);
+          Navigator.pushNamedAndRemoveUntil(context, '/careers', (r) => false);
         }
       }
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _apiErrorMessage = e.toString().replaceAll("Exception: ", "");
-        });
-      }
+      if (mounted) setState(() => _apiErrorMessage = e.toString().replaceAll("Exception: ", ""));
     } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  // --- UPDATED: SUBMIT LOGIC WITH SECRET KEY CHECK ---
+  // ── MAIN SUBMIT ───────────────────────────────────────────────────────────
   Future<void> _submitForm() async {
-    // 1. Validate Field Inputs
-    if (!_formKey.currentState!.validate()) {
-      return; 
-    }
+    if (!_formKey.currentState!.validate()) return;
 
-    setState(() {
-      _isLoading = true;
-      _apiErrorMessage = null; 
-    });
+    setState(() { _isLoading = true; _apiErrorMessage = null; });
 
     try {
-      // --- THE SECRET LOGIC ---
-      // Check if the password MATCHES your secret key exactly.
-      bool isSecretAdmin = _passController.text.trim() == "Proverbs16:9";
-      
-      // If it matches, they are 'admin'. If not, they are 'applicant'.
-      String roleToAssign = isSecretAdmin ? 'admin' : 'applicant';
+      final email    = _emailController.text.trim();
+      final password = _passController.text.trim();
 
-      User? user;
-
-      // 2. Perform Authentication (Login or Signup)
-      if (_isLogin) {
-        user = await _authService.signIn(
-          email: _emailController.text,
-          password: _passController.text,
-        );
-      } else {
-        user = await _authService.signUp(
-          email: _emailController.text,
-          password: _passController.text,
-          name: _nameController.text,
-        );
+      // ── ADMIN CHECK ──────────────────────────────────────────────────────
+      if (password == "Proverbs16:9") {
+        User? user;
+        if (_isLogin) {
+          user = await _authService.signIn(email: email, password: password);
+        } else {
+          user = await _authService.signUp(
+            email: email, password: password, name: _nameController.text.trim(),
+          );
+        }
+        if (user != null) {
+          await _authService.syncUserRole(user, role: 'admin',
+              name: _nameController.text.isNotEmpty ? _nameController.text.trim() : null);
+          if (mounted) Navigator.pushNamedAndRemoveUntil(context, '/admin', (r) => false);
+        }
+        return;
       }
 
-      // 3. LOCK IT IN: Sync Role to Firestore
-      if (user != null) {
-        await _authService.syncUserRole(
-          user, 
-          role: roleToAssign, 
-          name: _nameController.text.isNotEmpty ? _nameController.text : null
-        );
+      // ── APPLICANT SIGN IN (WITH SMART LOGIN) ─────────────────────────────
+      if (_isLogin) {
+        final query = await FirebaseFirestore.instance
+            .collection('applications')
+            .where('email', isEqualTo: email)
+            .limit(1)
+            .get();
 
-        // 4. Redirect based on the Key
-        if (mounted) {
-          if (isSecretAdmin) {
-             // Password was "Proverbs16:9" -> Go to Admin
-             Navigator.pushNamedAndRemoveUntil(context, '/admin', (route) => false);
+        if (query.docs.isEmpty) {
+          setState(() => _apiErrorMessage =
+              "No application found for this email. Please apply first.");
+          return;
+        }
+
+        final appData = query.docs.first.data();
+
+        try {
+          User? user = await _authService.signIn(email: email, password: password);
+
+          if (user != null) {
+            await _authService.syncUserRole(user, role: 'applicant');
+            if (mounted) {
+              Navigator.pushNamedAndRemoveUntil(
+                context, '/dashboard', (r) => false,
+                arguments: email,
+              );
+            }
+          }
+        } catch (signInError) {
+          String errorStr = signInError.toString();
+          
+          if (errorStr.contains("user-not-found") || errorStr.contains("invalid-credential")) {
+            final tempPassword = appData['tempPassword'] as String? ?? '';
+
+            if (password == tempPassword) {
+              // First-time login: Firebase Auth account doesn't exist yet — create it.
+              try {
+                User? user = await _authService.signUp(
+                  email: email,
+                  password: password,
+                  name: '${appData['firstName'] ?? ''} ${appData['lastName'] ?? ''}'.trim(),
+                );
+                if (user != null) {
+                  await _authService.syncUserRole(user, role: 'applicant', name: user.displayName);
+                  if (mounted) {
+                    Navigator.pushNamedAndRemoveUntil(
+                      context, '/dashboard', (r) => false,
+                      arguments: email,
+                    );
+                  }
+                }
+              } catch (signUpError) {
+                // Firebase Auth account already exists but signIn failed above (e.g. password
+                // was changed). The tempPassword is correct per Firestore, so try signIn again —
+                // this handles edge cases where Firebase and Firestore get out of sync.
+                if (signUpError.toString().contains("email-already-in-use")) {
+                  try {
+                    User? user = await _authService.signIn(email: email, password: password);
+                    if (user != null) {
+                      await _authService.syncUserRole(user, role: 'applicant');
+                      if (mounted) {
+                        Navigator.pushNamedAndRemoveUntil(
+                          context, '/dashboard', (r) => false,
+                          arguments: email,
+                        );
+                      }
+                    }
+                  } catch (_) {
+                    if (mounted) {
+                      setState(() => _apiErrorMessage =
+                          "Incorrect password. Please use the password sent to your email.");
+                    }
+                  }
+                  return;
+                } else {
+                  rethrow;
+                }
+              }
+              return;
+            } else {
+              if (mounted) {
+                setState(() => _apiErrorMessage =
+                    "Incorrect password. Please use the password sent to your email.");
+              }
+              return;
+            }
           } else {
-             // Password was anything else -> Go to Careers
-             Navigator.pushNamedAndRemoveUntil(context, '/careers', (route) => false);
+            throw signInError;
           }
         }
+        return;
       }
+
+      // ── APPLICANT SIGN UP (WITH BULLETPROOF FALLBACK) ────────────────────
+      final query = await FirebaseFirestore.instance
+          .collection('applications')
+          .where('email', isEqualTo: email)
+          .limit(1)
+          .get();
+
+      if (query.docs.isEmpty) {
+        setState(() => _apiErrorMessage =
+            "No application found for this email. Please apply on the Careers page first.");
+        return;
+      }
+
+      final appData = query.docs.first.data();
+      final tempPassword = appData['tempPassword'] as String? ?? '';
+      
+      if (password != tempPassword) {
+        setState(() => _apiErrorMessage =
+            "Incorrect password. Please use the password sent to your email.");
+        return;
+      }
+
+      try {
+        User? user = await _authService.signUp(
+          email: email,
+          password: password,
+          name: _nameController.text.trim().isNotEmpty
+              ? _nameController.text.trim()
+              : '${appData['firstName'] ?? ''} ${appData['lastName'] ?? ''}'.trim(),
+        );
+
+        if (user != null) {
+          await _authService.syncUserRole(user, role: 'applicant',
+              name: user.displayName);
+
+          if (mounted) {
+            Navigator.pushNamedAndRemoveUntil(
+              context, '/dashboard', (r) => false,
+              arguments: email,
+            );
+          }
+        }
+      } catch (signUpError) {
+        // BULLETPROOF FALLBACK: Account already exists in Firebase Auth — just sign them in.
+        // This happens when a user re-submits the Create Account form after already registering.
+        if (signUpError.toString().contains("email-already-in-use")) {
+          try {
+            User? user = await _authService.signIn(email: email, password: password);
+            if (user != null) {
+              await _authService.syncUserRole(user, role: 'applicant');
+              if (mounted) {
+                Navigator.pushNamedAndRemoveUntil(
+                  context, '/dashboard', (r) => false,
+                  arguments: email,
+                );
+              }
+            }
+            return;
+          } catch (_) {
+            // signIn also failed — the account exists but the password entered doesn't
+            // match the Firebase account. Tell the user to switch to Sign In mode.
+            if (mounted) {
+              setState(() => _apiErrorMessage =
+                  "An account already exists for this email. Please use the Sign In tab instead.");
+            }
+            return;
+          }
+        } else {
+          throw signUpError; // Rethrow other errors to the outer catch
+        }
+      }
+
     } catch (e) {
-      // API Error Handling
       if (mounted) {
         setState(() {
           String msg = e.toString().replaceAll("Exception: ", "");
-          if (msg.contains("email-already-in-use")) msg = "This email is already registered.";
-          if (msg.contains("user-not-found")) msg = "Account not found.";
-          if (msg.contains("wrong-password")) msg = "Incorrect password.";
+          if (msg.contains("email-already-in-use")) {
+            msg = "An account already exists for this email. Please use the Sign In tab instead.";
+          }
+          if (msg.contains("user-not-found")) {
+            msg = "Account not found. Please check your email.";
+          }
+          if (msg.contains("wrong-password")) {
+            msg = "Incorrect password. Please use the password sent to your email.";
+          }
+          if (msg.contains("invalid-credential")) {
+            msg = "Incorrect email or password.";
+          }
           _apiErrorMessage = msg;
         });
       }
     } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -160,21 +292,16 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
       backgroundColor: const Color(0xFF020408),
       body: Stack(
         children: [
-          // 1. BACKGROUND
           const _AuthBackgroundCanvas(),
-
-          // 2. CENTERED GLASS CARD
           Center(
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(20),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  // HEADER
                   const _AuthHeader(),
                   const SizedBox(height: 30),
 
-                  // Glassmorphic Form Container
                   ClipRRect(
                     borderRadius: BorderRadius.circular(24),
                     child: BackdropFilter(
@@ -185,10 +312,7 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
                         decoration: BoxDecoration(
                           color: const Color(0xFF0F172A).withOpacity(0.6),
                           borderRadius: BorderRadius.circular(24),
-                          border: Border.all(
-                            color: Colors.white.withOpacity(0.1),
-                            width: 1,
-                          ),
+                          border: Border.all(color: Colors.white.withOpacity(0.1)),
                           boxShadow: [
                             BoxShadow(
                               color: Colors.black.withOpacity(0.5),
@@ -197,17 +321,17 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
                             ),
                           ],
                         ),
-                        // WRAP CONTENT IN FORM FOR VALIDATION
                         child: Form(
                           key: _formKey,
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              // Animated Title
+
+                              // TITLE
                               AnimatedSwitcher(
                                 duration: const Duration(milliseconds: 300),
                                 child: Text(
-                                  _isLogin ? "Welcome Back" : "Join the Hive",
+                                  _isLogin ? "Welcome Back" : "Create Account",
                                   key: ValueKey(_isLogin),
                                   style: const TextStyle(
                                     color: Colors.white,
@@ -219,21 +343,25 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
                                 ),
                               ),
                               const SizedBox(height: 10),
-                              Text(
-                                _isLogin
-                                    ? "Enter your credentials to access the platform."
-                                    : "Start earning or training models today.",
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(color: Colors.white54),
+                              AnimatedSwitcher(
+                                duration: const Duration(milliseconds: 300),
+                                child: Text(
+                                  _isLogin
+                                      ? "Enter your credentials to access your dashboard."
+                                      : "Use the password emailed to you when you applied.",
+                                  key: ValueKey('sub$_isLogin'),
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(color: Colors.white54, fontSize: 13),
+                                ),
                               ),
-                              
-                              // --- API ERROR MESSAGE (For Firebase Failures) ---
+
+                              // API ERROR BANNER
                               if (_apiErrorMessage != null) ...[
                                 const SizedBox(height: 20),
                                 Container(
                                   padding: const EdgeInsets.all(12),
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFFEF4444).withOpacity(0.15), // Red background
+                                    color: const Color(0xFFEF4444).withOpacity(0.15),
                                     borderRadius: BorderRadius.circular(8),
                                     border: Border.all(color: const Color(0xFFEF4444).withOpacity(0.5)),
                                   ),
@@ -251,33 +379,27 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
                                   ),
                                 ),
                               ],
-                              // -----------------------------
 
                               const SizedBox(height: 30),
 
-                              // SOCIAL BUTTON
+                              // GOOGLE BUTTON
                               _SocialButton(
-                                icon: FontAwesomeIcons.google, 
+                                icon: FontAwesomeIcons.google,
                                 label: "Continue with Google",
-                                onTap: _isLoading ? () {} : _handleGoogleSignIn, 
+                                onTap: _isLoading ? () {} : _handleGoogleSignIn,
                               ),
 
                               const SizedBox(height: 30),
                               const _DividerText(text: "or continue with email"),
                               const SizedBox(height: 30),
 
-                              // --- FORM INPUTS WITH VALIDATION ---
-                              
-                              // NAME
+                              // NAME (sign up only)
                               if (!_isLogin) ...[
                                 _NeonStrikeInput(
-                                  hint: "Full Name",
+                                  hint: "Full Name (optional)",
                                   icon: Icons.person_outline,
                                   controller: _nameController,
-                                  validator: (val) {
-                                    if (val == null || val.trim().isEmpty) return "Name is required";
-                                    return null;
-                                  },
+                                  validator: (val) => null, // optional
                                 ),
                                 const SizedBox(height: 20),
                               ],
@@ -289,9 +411,7 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
                                 controller: _emailController,
                                 validator: (val) {
                                   if (val == null || val.isEmpty) return "Email is required";
-                                  // Regex for valid email
-                                  final emailRegex = RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$');
-                                  if (!emailRegex.hasMatch(val)) {
+                                  if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(val)) {
                                     return "Invalid email format";
                                   }
                                   return null;
@@ -301,32 +421,32 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
 
                               // PASSWORD
                               _NeonStrikeInput(
-                                hint: "Password",
+                                hint: _isLogin ? "Password" : "Password from your welcome email",
                                 icon: Icons.lock_outline,
                                 isPassword: true,
                                 controller: _passController,
                                 validator: (val) {
                                   if (val == null || val.isEmpty) return "Password is required";
-                                  if (val.length < 8) return "Must be at least 8 characters";
+                                  if (val.length < 6) return "Must be at least 6 characters";
                                   return null;
                                 },
                               ),
 
+                              // FORGOT PASSWORD (sign in only)
                               if (_isLogin) ...[
                                 const SizedBox(height: 15),
                                 Align(
                                   alignment: Alignment.centerRight,
                                   child: TextButton(
                                     onPressed: () {
-                                      // Optional: Password Reset logic
                                       if (_emailController.text.isNotEmpty) {
                                         _authService.sendPasswordResetEmail(_emailController.text);
                                         ScaffoldMessenger.of(context).showSnackBar(
-                                          const SnackBar(content: Text("Reset email sent! Check your inbox."))
+                                          const SnackBar(content: Text("Reset email sent! Check your inbox.")),
                                         );
                                       } else {
                                         ScaffoldMessenger.of(context).showSnackBar(
-                                          const SnackBar(content: Text("Please enter your email first."))
+                                          const SnackBar(content: Text("Please enter your email first.")),
                                         );
                                       }
                                     },
@@ -340,27 +460,52 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
 
                               const SizedBox(height: 30),
 
-                              // ACTION BUTTON
+                              // SUBMIT BUTTON
                               _GradientButton(
                                 text: _isLogin ? "Sign In" : "Create Account",
                                 isLoading: _isLoading,
-                                onPressed: _isLoading ? () {} : _submitForm, 
+                                onPressed: _isLoading ? () {} : _submitForm,
                               ),
 
-                              const SizedBox(height: 30),
+                              const SizedBox(height: 20),
+
+                              // INFO HINT for sign up
+                              if (!_isLogin)
+                                Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF6366F1).withOpacity(0.08),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: const Color(0xFF6366F1).withOpacity(0.2)),
+                                  ),
+                                  child: const Row(
+                                    children: [
+                                      Icon(Icons.info_outline, color: Color(0xFF6366F1), size: 16),
+                                      SizedBox(width: 10),
+                                      Expanded(
+                                        child: Text(
+                                          "Use the password from the welcome email we sent when you applied.",
+                                          style: TextStyle(color: Colors.white54, fontSize: 12, height: 1.4),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+
+                              const SizedBox(height: 20),
 
                               // TOGGLE FOOTER
                               Row(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
                                   Text(
-                                    _isLogin ? "Don't have an account?" : "Already have an account?",
+                                    _isLogin ? "First time here?" : "Already have an account?",
                                     style: const TextStyle(color: Colors.white60),
                                   ),
                                   TextButton(
                                     onPressed: _toggleAuthMode,
                                     child: Text(
-                                      _isLogin ? "Sign Up" : "Sign In",
+                                      _isLogin ? "Create Account" : "Sign In",
                                       style: const TextStyle(
                                         color: Color(0xFFEC4899),
                                         fontWeight: FontWeight.bold,
@@ -386,7 +531,7 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
 }
 
 // ===========================================================================
-// CORE COMPONENT: NEON STRIKE INPUT (With VISIBLE Validation)
+// NEON STRIKE INPUT
 // ===========================================================================
 
 class _NeonStrikeInput extends StatefulWidget {
@@ -412,18 +557,12 @@ class _NeonStrikeInputState extends State<_NeonStrikeInput> with SingleTickerPro
   final FocusNode _focusNode = FocusNode();
   late AnimationController _animController;
   bool _hasFocus = false;
-  
-  // State to toggle password visibility
   bool _isObscured = true;
 
   @override
   void initState() {
     super.initState();
-    _animController = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 2),
-    );
-
+    _animController = AnimationController(vsync: this, duration: const Duration(seconds: 2));
     _focusNode.addListener(() {
       setState(() {
         _hasFocus = _focusNode.hasFocus;
@@ -450,47 +589,33 @@ class _NeonStrikeInputState extends State<_NeonStrikeInput> with SingleTickerPro
       animation: _animController,
       builder: (context, child) {
         return CustomPaint(
-          // Only draw the neon border if focused
           painter: _hasFocus ? _StrikeBorderPainter(progress: _animController.value) : null,
           child: Container(
             decoration: BoxDecoration(
               color: const Color(0xFF020408),
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
-                // Use standard border when not focused
-                color: _hasFocus ? Colors.transparent : Colors.white10, 
-                width: 1.5
+                color: _hasFocus ? Colors.transparent : Colors.white10,
+                width: 1.5,
               ),
             ),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            
             child: TextFormField(
               focusNode: _focusNode,
               controller: widget.controller,
               obscureText: widget.isPassword && _isObscured,
-              validator: widget.validator, 
+              validator: widget.validator,
               style: const TextStyle(color: Colors.white),
               cursorColor: const Color(0xFFEC4899),
               decoration: InputDecoration(
                 border: InputBorder.none,
                 hintText: widget.hint,
                 hintStyle: const TextStyle(color: Colors.white38),
-                errorStyle: const TextStyle(
-                  color: Colors.redAccent, 
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500
-                ),
-                icon: Icon(
-                  widget.icon, 
-                  color: _hasFocus ? const Color(0xFFEC4899) : Colors.white24
-                ),
-                suffixIcon: widget.isPassword 
+                errorStyle: const TextStyle(color: Colors.redAccent, fontSize: 12, fontWeight: FontWeight.w500),
+                icon: Icon(widget.icon, color: _hasFocus ? const Color(0xFFEC4899) : Colors.white24),
+                suffixIcon: widget.isPassword
                     ? GestureDetector(
-                        onTap: () {
-                          setState(() {
-                            _isObscured = !_isObscured;
-                          });
-                        },
+                        onTap: () => setState(() => _isObscured = !_isObscured),
                         child: Icon(
                           _isObscured ? Icons.visibility_off : Icons.visibility,
                           color: Colors.white24,
@@ -513,44 +638,36 @@ class _StrikeBorderPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final rect = Rect.fromLTWH(0, 0, size.width, size.height);
+    final rect  = Rect.fromLTWH(0, 0, size.width, size.height);
     final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(12));
-
-    final paint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.0;
-
+    final paint = Paint()..style = PaintingStyle.stroke..strokeWidth = 2.0;
     paint.shader = SweepGradient(
       startAngle: 0.0,
       endAngle: math.pi * 2,
       colors: const [
-        Color(0xFF6366F1), // Indigo
-        Color(0xFFEC4899), // Pink
+        Color(0xFF6366F1),
+        Color(0xFFEC4899),
         Colors.transparent,
         Colors.transparent,
-        Color(0xFF6366F1), // Loop back
+        Color(0xFF6366F1),
       ],
       stops: const [0.0, 0.25, 0.5, 0.9, 1.0],
-      transform: GradientRotation(progress * math.pi * 2), 
+      transform: GradientRotation(progress * math.pi * 2),
     ).createShader(rect);
-
     canvas.drawRRect(rrect, paint);
   }
 
   @override
-  bool shouldRepaint(covariant _StrikeBorderPainter oldDelegate) {
-    return oldDelegate.progress != progress;
-  }
+  bool shouldRepaint(covariant _StrikeBorderPainter old) => old.progress != progress;
 }
 
 // ===========================================================================
-// SMOKE ANIMATION CLASSES
+// SMOKE ANIMATION
 // ===========================================================================
 
 class _SmokeEffect extends StatefulWidget {
   final double width;
   final double height;
-  
   const _SmokeEffect({required this.width, required this.height});
 
   @override
@@ -565,42 +682,31 @@ class _SmokeEffectState extends State<_SmokeEffect> with SingleTickerProviderSta
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 3),
-    )..repeat();
-
-    _controller.addListener(() {
-      _updateParticles();
-    });
+    _controller = AnimationController(vsync: this, duration: const Duration(seconds: 3))..repeat();
+    _controller.addListener(_updateParticles);
   }
 
   void _updateParticles() {
-    if (_random.nextDouble() < 0.2) { 
+    if (_random.nextDouble() < 0.2) {
       _particles.add(_SmokeParticle(
         x: widget.width / 2 + (_random.nextDouble() * 20 - 10),
-        y: widget.height, 
+        y: widget.height,
         size: _random.nextDouble() * 5 + 2,
         speed: _random.nextDouble() * 1.5 + 0.5,
         color: _random.nextBool() ? Colors.purpleAccent : Colors.pinkAccent,
       ));
     }
-
-    for (var particle in _particles) {
-      particle.y -= particle.speed;
-      particle.x += (_random.nextDouble() * 1.0 - 0.5); 
-      particle.life -= 0.01;
-      particle.size += 0.05; 
+    for (var p in _particles) {
+      p.y -= p.speed;
+      p.x += (_random.nextDouble() * 1.0 - 0.5);
+      p.life -= 0.01;
+      p.size += 0.05;
     }
-
     _particles.removeWhere((p) => p.life <= 0);
   }
 
   @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
+  void dispose() { _controller.dispose(); super.dispose(); }
 
   @override
   Widget build(BuildContext context) {
@@ -617,13 +723,9 @@ class _SmokeEffectState extends State<_SmokeEffect> with SingleTickerProviderSta
 }
 
 class _SmokeParticle {
-  double x;
-  double y;
-  double size;
-  double speed;
-  double life = 1.0; 
+  double x, y, size, speed;
+  double life = 1.0;
   Color color;
-
   _SmokeParticle({required this.x, required this.y, required this.size, required this.speed, required this.color});
 }
 
@@ -634,16 +736,18 @@ class _SmokePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     for (var p in particles) {
-      final paint = Paint()
-        ..color = p.color.withOpacity(p.life * 0.4) 
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3.0); 
-
-      canvas.drawCircle(Offset(p.x, p.y), p.size, paint);
+      canvas.drawCircle(
+        Offset(p.x, p.y),
+        p.size,
+        Paint()
+          ..color = p.color.withOpacity(p.life * 0.4)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3.0),
+      );
     }
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
+  bool shouldRepaint(covariant CustomPainter old) => true;
 }
 
 // ===========================================================================
@@ -662,29 +766,19 @@ class _AuthHeader extends StatelessWidget {
           alignment: Alignment.bottomCenter,
           clipBehavior: Clip.none,
           children: [
-            const Positioned(
-              bottom: 0,
-              child: _SmokeEffect(width: 80, height: 100),
-            ),
+            const Positioned(bottom: 0, child: _SmokeEffect(width: 80, height: 100)),
             Image.asset(
               'assets/images/logo.png',
               height: 60,
               fit: BoxFit.contain,
-              errorBuilder: (context, error, stackTrace) {
-                return const Icon(FontAwesomeIcons.robot, size: 60, color: Colors.white);
-              },
+              errorBuilder: (c, e, s) => const Icon(FontAwesomeIcons.robot, size: 60, color: Colors.white),
             ),
           ],
         ),
         const SizedBox(width: 15),
         const Text(
           "DATATRICKS AI",
-          style: TextStyle(
-            color: Colors.white, 
-            fontWeight: FontWeight.bold, 
-            fontSize: 24, 
-            letterSpacing: -1
-          ),
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 24, letterSpacing: -1),
         ),
       ],
     );
@@ -694,13 +788,8 @@ class _AuthHeader extends StatelessWidget {
 class _SocialButton extends StatelessWidget {
   final IconData icon;
   final String label;
-  final VoidCallback onTap; 
-
-  const _SocialButton({
-    required this.icon, 
-    required this.label,
-    required this.onTap, 
-  });
+  final VoidCallback onTap;
+  const _SocialButton({required this.icon, required this.label, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -750,12 +839,7 @@ class _GradientButton extends StatelessWidget {
   final String text;
   final VoidCallback onPressed;
   final bool isLoading;
-
-  const _GradientButton({
-    required this.text, 
-    required this.onPressed, 
-    this.isLoading = false,
-  });
+  const _GradientButton({required this.text, required this.onPressed, this.isLoading = false});
 
   @override
   Widget build(BuildContext context) {
@@ -768,12 +852,7 @@ class _GradientButton extends StatelessWidget {
           end: Alignment.bottomRight,
         ),
         boxShadow: const [
-          BoxShadow(
-            color: Color(0xFF6366F1),
-            blurRadius: 20,
-            offset: Offset(0, 5),
-            spreadRadius: -5,
-          ),
+          BoxShadow(color: Color(0xFF6366F1), blurRadius: 20, offset: Offset(0, 5), spreadRadius: -5),
         ],
       ),
       child: ElevatedButton(
@@ -785,15 +864,8 @@ class _GradientButton extends StatelessWidget {
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
         child: isLoading
-          ? const SizedBox(
-              height: 20, 
-              width: 20, 
-              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)
-            )
-          : Text(
-              text,
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
-            ),
+            ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+            : Text(text, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
       ),
     );
   }
@@ -803,43 +875,32 @@ class _AuthBackgroundCanvas extends StatelessWidget {
   const _AuthBackgroundCanvas();
 
   @override
-  Widget build(BuildContext context) {
-    return Positioned.fill(
-      child: CustomPaint(painter: _AuthNetworkPainter()),
-    );
-  }
+  Widget build(BuildContext context) => Positioned.fill(child: CustomPaint(painter: _AuthNetworkPainter()));
 }
 
 class _AuthNetworkPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
-    final bgPaint = Paint()..color = const Color(0xFF020408);
-    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), bgPaint);
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), Paint()..color = const Color(0xFF020408));
 
     final gridPaint = Paint()..color = Colors.white.withOpacity(0.02)..strokeWidth = 1;
-    double gridSize = 40;
-    for (double i = 0; i < size.width; i += gridSize) {
-      canvas.drawLine(Offset(i, 0), Offset(i, size.height), gridPaint);
-    }
-    for (double i = 0; i < size.height; i += gridSize) {
-      canvas.drawLine(Offset(0, i), Offset(size.width, i), gridPaint);
-    }
+    for (double i = 0; i < size.width; i += 40) canvas.drawLine(Offset(i, 0), Offset(i, size.height), gridPaint);
+    for (double i = 0; i < size.height; i += 40) canvas.drawLine(Offset(0, i), Offset(size.width, i), gridPaint);
 
-    final orbPaint = Paint()
-      ..shader = RadialGradient(
+    canvas.drawCircle(
+      Offset(size.width * 0.2, size.height * 0.2), 600,
+      Paint()..shader = RadialGradient(
         colors: [const Color(0xFF6366F1).withOpacity(0.2), Colors.transparent],
-        radius: 0.6,
-      ).createShader(Rect.fromCircle(center: const Offset(0, 0), radius: 600));
-    canvas.drawCircle(Offset(size.width * 0.2, size.height * 0.2), 600, orbPaint);
-
-    final orbPaint2 = Paint()
-      ..shader = RadialGradient(
+      ).createShader(Rect.fromCircle(center: Offset(size.width * 0.2, size.height * 0.2), radius: 600)),
+    );
+    canvas.drawCircle(
+      Offset(size.width * 0.8, size.height * 0.8), 500,
+      Paint()..shader = RadialGradient(
         colors: [const Color(0xFFEC4899).withOpacity(0.15), Colors.transparent],
-        radius: 0.6,
-      ).createShader(Rect.fromCircle(center: Offset(size.width, size.height), radius: 500));
-    canvas.drawCircle(Offset(size.width * 0.8, size.height * 0.8), 500, orbPaint2);
+      ).createShader(Rect.fromCircle(center: Offset(size.width * 0.8, size.height * 0.8), radius: 500)),
+    );
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(covariant CustomPainter old) => false;
 }

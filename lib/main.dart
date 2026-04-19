@@ -7,7 +7,8 @@ import 'package:flutter_web_plugins/url_strategy.dart'; // REQUIRED: For clean w
 import 'package:datatricksai/pages/landing_page.dart';
 import 'package:datatricksai/pages/auth_page.dart';
 import 'package:datatricksai/pages/careers_page.dart';
-import 'package:datatricksai/pages/admin_dashboard.dart'; // NEW: Import Admin Page
+import 'package:datatricksai/pages/admin_dashboard.dart';
+import 'package:datatricksai/pages/user_dashboard.dart';
 
 // ===========================================================================
 // MAIN ENTRY POINT
@@ -38,7 +39,7 @@ class DataTricksApp extends StatelessWidget {
     return MaterialApp(
       title: 'DataTricks AI | The Human Intelligence Layer',
       debugShowCheckedModeBanner: false,
-      
+
       // THEME CONFIGURATION
       theme: ThemeData(
         brightness: Brightness.dark,
@@ -46,14 +47,14 @@ class DataTricksApp extends StatelessWidget {
         primaryColor: const Color(0xFF6366F1), // Indigo
         fontFamily: 'Inter',
         useMaterial3: true,
-        
+
         colorScheme: const ColorScheme.dark(
           primary: Color(0xFF6366F1),
           secondary: Color(0xFFEC4899), // Pink
           surface: Color(0xFF0F172A),
           background: Color(0xFF020408),
         ),
-        
+
         textTheme: const TextTheme(
           displayLarge: TextStyle(
             fontSize: 76,
@@ -76,13 +77,31 @@ class DataTricksApp extends StatelessWidget {
         ),
       ),
 
-      // ROUTES
+      // STATIC ROUTES
       initialRoute: '/',
       routes: {
-        '/': (context) => const LandingPage(),
-        '/auth': (context) => const AuthPage(),
+        '/':        (context) => const LandingPage(),
+        '/auth':    (context) => const AuthPage(),
         '/careers': (context) => const CareersPage(),
-        '/admin': (context) => const AdminDashboard(), // NEW: Admin Route
+        '/admin':   (context) => const AdminDashboard(),
+      },
+
+      // /dashboard uses onGenerateRoute so it can receive
+      // the userEmail as a navigation argument from AuthPage:
+      //
+      //   Navigator.pushNamedAndRemoveUntil(
+      //     context, '/dashboard', (r) => false,
+      //     arguments: 'user@example.com',
+      //   );
+      //
+      onGenerateRoute: (settings) {
+        if (settings.name == '/dashboard') {
+          final email = settings.arguments as String? ?? '';
+          return MaterialPageRoute(
+            builder: (context) => UserDashboard(userEmail: email),
+          );
+        }
+        return null;
       },
     );
   }

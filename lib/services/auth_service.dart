@@ -127,7 +127,7 @@ class AuthService {
       case 'wrong-password':
         return 'Wrong password provided.';
       case 'email-already-in-use':
-        return 'The account already exists for that email.';
+        return 'email-already-in-use';
       case 'credential-already-in-use':
         return 'This email is already associated with a different account.';
       case 'invalid-email':
