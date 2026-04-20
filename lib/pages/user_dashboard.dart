@@ -356,16 +356,55 @@ class _Sidebar extends StatelessWidget {
             Expanded(
               child: ListView(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-                children: _items.map((item) {
-                  final active = this.active == item.$1;
-                  return _SidebarItem(
-                    icon: item.$2, 
-                    label: item.$3,
-                    isActive: active, 
-                    expanded: expanded,
-                    onTap: () => onTap(item.$1),
-                  );
-                }).toList(),
+                children: [
+                  ..._items.map((item) {
+                    final active = this.active == item.$1;
+                    return _SidebarItem(
+                      icon: item.$2, 
+                      label: item.$3,
+                      isActive: active, 
+                      expanded: expanded,
+                      onTap: () => onTap(item.$1),
+                    );
+                  }),
+                  const SizedBox(height: 8),
+                  // Share button in sidebar
+                  Builder(builder: (ctx) => GestureDetector(
+                    onTap: () => _shareCareerLink(ctx),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 260),
+                      margin: const EdgeInsets.symmetric(vertical: 4),
+                      padding: EdgeInsets.symmetric(horizontal: expanded ? 12 : 0, vertical: 10),
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFF6366F1), Color(0xFF8B5CF6)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        borderRadius: BorderRadius.circular(10),
+                        boxShadow: [
+                          BoxShadow(color: const Color(0xFF6366F1).withOpacity(0.3), blurRadius: 8, offset: const Offset(0, 3)),
+                        ],
+                      ),
+                      child: Row(
+                        mainAxisAlignment: expanded ? MainAxisAlignment.start : MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.share_rounded, color: Colors.white, size: 17),
+                          if (expanded) ...[
+                            const SizedBox(width: 10),
+                            const Expanded(
+                              child: Text(
+                                'Share & Earn',
+                                style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  )),
+                ],
               ),
             ),
 
@@ -509,11 +548,12 @@ class _TopBar extends StatelessWidget {
               style: const TextStyle(color: _textPrimary, fontWeight: FontWeight.w700, fontSize: 17)
             ),
             const Spacer(),
-            _StatusChip(status: status),
+            GestureDetector(
+              onTap: () => _showPendingReviewPopup(context),
+              child: _StatusChip(status: status),
+            ),
             const SizedBox(width: 10),
             _IBtn(icon: Icons.notifications_none_rounded, onTap: () {}),
-            const SizedBox(width: 8),
-            _IBtn(icon: Icons.help_outline_rounded, onTap: () {}),
           ]),
         ),
       ),
@@ -594,6 +634,342 @@ String _sl(String? s) {
 }
 
 // ===========================================================================
+// PENDING REVIEW POPUP
+// ===========================================================================
+
+void _showPendingReviewPopup(BuildContext context) {
+  showGeneralDialog(
+    context: context,
+    barrierDismissible: true,
+    barrierLabel: 'Dismiss',
+    barrierColor: Colors.black.withOpacity(0.55),
+    transitionDuration: const Duration(milliseconds: 320),
+    transitionBuilder: (_, anim, __, child) {
+      final curved = CurvedAnimation(parent: anim, curve: Curves.easeOutBack);
+      return ScaleTransition(
+        scale: Tween<double>(begin: 0.82, end: 1.0).animate(curved),
+        child: FadeTransition(opacity: anim, child: child),
+      );
+    },
+    pageBuilder: (ctx, _, __) => Center(
+      child: Material(
+        color: Colors.transparent,
+        child: Container(
+          width: 380,
+          margin: const EdgeInsets.symmetric(horizontal: 28),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(24),
+            boxShadow: [
+              BoxShadow(color: _amber.withOpacity(0.25), blurRadius: 40, spreadRadius: 4, offset: const Offset(0, 12)),
+              BoxShadow(color: Colors.black.withOpacity(0.10), blurRadius: 20, offset: const Offset(0, 6)),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Gradient header
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 32),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFFFFF7E6), Color(0xFFFEF3C7), Color(0xFFFDE68A)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+                ),
+                child: Column(
+                  children: [
+                    // Animated pulse icon
+                    Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        Container(
+                          width: 80, height: 80,
+                          decoration: BoxDecoration(
+                            color: _amber.withOpacity(0.15),
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        Container(
+                          width: 62, height: 62,
+                          decoration: BoxDecoration(
+                            color: _amber.withOpacity(0.25),
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        Container(
+                          width: 46, height: 46,
+                          decoration: const BoxDecoration(
+                            color: _amber,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.shield_outlined, color: Colors.white, size: 24),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Pending Review',
+                      style: TextStyle(
+                        color: Color(0xFF92400E),
+                        fontSize: 22,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: -0.3,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // Body
+              Padding(
+                padding: const EdgeInsets.fromLTRB(28, 24, 28, 28),
+                child: Column(
+                  children: [
+                    // Warning banner
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFF7ED),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: _amber.withOpacity(0.4), width: 1.5),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Icon(Icons.info_outline_rounded, color: _amber, size: 20),
+                          const SizedBox(width: 10),
+                          const Expanded(
+                            child: Text(
+                              'Persona Verification is Missing',
+                              style: TextStyle(
+                                color: Color(0xFF92400E),
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                                height: 1.4,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Your account is currently under review. To unlock full access and start earning, please complete your persona verification.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: _textSecondary,
+                        fontSize: 13,
+                        height: 1.6,
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    // Steps
+                    _PopupStep(
+                      number: '1',
+                      label: 'Complete persona verification',
+                      color: _primary,
+                    ),
+                    const SizedBox(height: 10),
+                    _PopupStep(
+                      number: '2',
+                      label: 'Await approval',
+                      color: _secondary,
+                    ),
+                    const SizedBox(height: 28),
+                    // CTA button
+                    SizedBox(
+                      width: double.infinity,
+                      child: GestureDetector(
+                        onTap: () => Navigator.of(ctx).pop(),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          decoration: BoxDecoration(
+                            gradient: const LinearGradient(
+                              colors: [_amber, Color(0xFFF97316)],
+                              begin: Alignment.centerLeft,
+                              end: Alignment.centerRight,
+                            ),
+                            borderRadius: BorderRadius.circular(12),
+                            boxShadow: [
+                              BoxShadow(color: _amber.withOpacity(0.4), blurRadius: 12, offset: const Offset(0, 4)),
+                            ],
+                          ),
+                          child: const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.verified_user_rounded, color: Colors.white, size: 17),
+                              SizedBox(width: 8),
+                              Text(
+                                'Got it',
+                                style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 14),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+class _PopupStep extends StatelessWidget {
+  final String number, label;
+  final Color color;
+  const _PopupStep({required this.number, required this.label, required this.color});
+
+  @override
+  Widget build(BuildContext context) => Row(children: [
+    Container(
+      width: 26, height: 26,
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.12),
+        shape: BoxShape.circle,
+        border: Border.all(color: color.withOpacity(0.4)),
+      ),
+      child: Center(
+        child: Text(number, style: TextStyle(color: color, fontWeight: FontWeight.w800, fontSize: 12)),
+      ),
+    ),
+    const SizedBox(width: 12),
+    Expanded(
+      child: Text(label, style: const TextStyle(color: _textSecondary, fontSize: 13, fontWeight: FontWeight.w500)),
+    ),
+  ]);
+}
+
+// ===========================================================================
+// SHARE CAREERS LINK
+// ===========================================================================
+
+const _careersUrl = 'https://datatricksai.us/careers';
+
+void _shareCareerLink(BuildContext context) {
+  // Works on web (opens share sheet) and mobile via share_plus
+  try {
+    Share.share(
+      'Join me on DataTricks AI and start earning! Apply for exciting AI data projects here: $_careersUrl',
+      subject: 'Earn with DataTricks AI — Apply Now!',
+    );
+  } catch (_) {
+    // Fallback: copy to clipboard
+    Clipboard.setData(const ClipboardData(text: _careersUrl));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: const Text('Careers link copied to clipboard!'),
+      backgroundColor: _secondary,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+    ));
+  }
+}
+
+class _ShareBanner extends StatelessWidget {
+  const _ShareBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF6366F1), Color(0xFF8B5CF6), Color(0xFF06B6D4)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(color: const Color(0xFF6366F1).withOpacity(0.35), blurRadius: 20, offset: const Offset(0, 6)),
+        ],
+      ),
+      child: Stack(
+        children: [
+          // Decorative circles
+          Positioned(
+            right: -18, top: -18,
+            child: Container(
+              width: 90, height: 90,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.07),
+                shape: BoxShape.circle,
+              ),
+            ),
+          ),
+          Positioned(
+            right: 30, bottom: -28,
+            child: Container(
+              width: 70, height: 70,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.05),
+                shape: BoxShape.circle,
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+            child: Row(children: [
+              // Icon badge
+              Container(
+                width: 48, height: 48,
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.18),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(Icons.people_alt_rounded, color: Colors.white, size: 24),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Share with Friends & Earn',
+                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 14, letterSpacing: -0.2),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      'Invite friends to apply for AI projects',
+                      style: TextStyle(color: Colors.white.withOpacity(0.78), fontSize: 11),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              GestureDetector(
+                onTap: () => _shareCareerLink(context),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(10),
+                    boxShadow: [
+                      BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 8, offset: const Offset(0, 2)),
+                    ],
+                  ),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: const [
+                    Icon(Icons.share_rounded, color: Color(0xFF6366F1), size: 15),
+                    SizedBox(width: 6),
+                    Text('Share', style: TextStyle(color: Color(0xFF6366F1), fontWeight: FontWeight.w800, fontSize: 12)),
+                  ]),
+                ),
+              ),
+            ]),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ===========================================================================
 // JOBS PAGE
 // ===========================================================================
 
@@ -614,14 +990,8 @@ class _JobsPage extends StatelessWidget {
         const _EarningsStrip(),
         const SizedBox(height: 20),
 
-        // Update profile CTA with Glassmorphism Theme
-        GlassContainer(
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-          child: Row(children: const [
-            Expanded(child: Text('Update your profile', style: TextStyle(color: _textPrimary, fontWeight: FontWeight.w600, fontSize: 14))),
-            Icon(Icons.chevron_right_rounded, color: _textMuted, size: 20),
-          ]),
-        ),
+        // Share with friends CTA
+        const _ShareBanner(),
         const SizedBox(height: 28),
 
         // Opportunities
@@ -632,7 +1002,6 @@ class _JobsPage extends StatelessWidget {
     );
   }
 }
-
 class _EarningsStrip extends StatelessWidget {
   const _EarningsStrip();
   
@@ -1008,7 +1377,10 @@ class _ProfilePage extends StatelessWidget {
                     style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 13)
                   ),
                   const SizedBox(height: 10),
-                  _StatusChip(status: userData['status'] ?? 'pending'),
+                  GestureDetector(
+                    onTap: () => _showPendingReviewPopup(context),
+                    child: _StatusChip(status: userData['status'] ?? 'pending'),
+                  ),
                 ]
               )
             ),
@@ -1063,6 +1435,8 @@ class _ProfilePage extends StatelessWidget {
             );
           }
         }),
+        const SizedBox(height: 20),
+        const _ShareBanner(),
       ]),
     );
   }
@@ -1158,7 +1532,55 @@ class _SettingsPage extends StatelessWidget {
     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const Text('Settings', style: TextStyle(color: _textPrimary, fontWeight: FontWeight.w700, fontSize: 17)),
       const SizedBox(height: 20),
-      
+
+      // Verification status banner
+      GlassContainer(
+        padding: const EdgeInsets.all(20),
+        color: const Color(0xFFFFFBEB),
+        border: Border.all(color: _amber.withOpacity(0.35), width: 1.5),
+        child: Row(children: [
+          Container(
+            width: 42, height: 42,
+            decoration: BoxDecoration(
+              color: _amber.withOpacity(0.15),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.shield_outlined, color: _amber, size: 22),
+          ),
+          const SizedBox(width: 14),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Persona Verification', style: TextStyle(color: _textPrimary, fontWeight: FontWeight.w700, fontSize: 13)),
+                SizedBox(height: 2),
+                Text('Your identity verification is pending review', style: TextStyle(color: _textMuted, fontSize: 11)),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          Builder(builder: (ctx) => GestureDetector(
+            onTap: () => _showPendingReviewPopup(ctx),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: _amber,
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(color: _amber.withOpacity(0.35), blurRadius: 8, offset: const Offset(0, 2)),
+                ],
+              ),
+              child: Row(mainAxisSize: MainAxisSize.min, children: const [
+                Icon(Icons.timelapse_rounded, color: Colors.white, size: 13),
+                SizedBox(width: 5),
+                Text('Pending Review', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 11)),
+              ]),
+            ),
+          )),
+        ]),
+      ),
+      const SizedBox(height: 16),
+
       const _SSection(title: 'Notifications', children: [
         _STgl(label: 'Email Alerts', subtitle: 'Receive daily updates on new opportunities', initial: true),
         _STgl(label: 'Push Notifications', subtitle: 'Instant alerts for application status changes', initial: true),
