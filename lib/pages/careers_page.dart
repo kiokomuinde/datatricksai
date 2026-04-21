@@ -115,14 +115,15 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
   final String _cloudName = "dgdnli7vh"; 
   final String _uploadPreset = "resumes_careers"; 
 
-  final _firstNameController    = TextEditingController();
-  final _lastNameController     = TextEditingController();
-  final _emailController        = TextEditingController();
-  final _phoneController        = TextEditingController();
-  final _zipController          = TextEditingController();
-  final _linkedinController     = TextEditingController();
-  final _otherSourceController  = TextEditingController(); 
-  final _highSchoolController   = TextEditingController();
+  final _firstNameController      = TextEditingController();
+  final _lastNameController       = TextEditingController();
+  final _emailController          = TextEditingController();
+  final _phoneController          = TextEditingController();
+  final _zipController            = TextEditingController();
+  final _linkedinController       = TextEditingController();
+  final _otherSourceController    = TextEditingController();
+  final _highSchoolController     = TextEditingController();
+  final _referralEmailController  = TextEditingController();
 
   String? _selectedRole;
   String? _selectedSource;
@@ -397,6 +398,9 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
     if (_selectedSource == "Other") {
       finalSource = "Other: ${_otherSourceController.text.trim()}";
     }
+    final String referralEmail = _selectedSource == "Referral"
+        ? _referralEmailController.text.trim()
+        : "";
 
     Navigator.push(
       context,
@@ -405,25 +409,26 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
           cloudName:    _cloudName,
           uploadPreset: _uploadPreset,
           formData: {
-            'firstName':   _firstNameController.text.trim(),
-            'lastName':    _lastNameController.text.trim(),
-            'email':       _emailController.text.trim(),
-            'phone':       "+1 ${_phoneController.text.trim()}",
-            'state':       _selectedState,
-            'city':        _selectedCity,
-            'zip':         _zipController.text.trim(),
-            'highSchool':  _highSchoolController.text.trim(), 
-            'role':        _selectedRole,
-            'linkedin':    _linkedinController.text.trim(),
-            'source':      finalSource, 
-            'resumeName':  _resumeFile!.name,
-            'suppDocName': _suppFile!.name,
-            'birthDate':   _selectedBirthDate != null
+            'firstName':     _firstNameController.text.trim(),
+            'lastName':      _lastNameController.text.trim(),
+            'email':         _emailController.text.trim(),
+            'phone':         "+1 ${_phoneController.text.trim()}",
+            'state':         _selectedState,
+            'city':          _selectedCity,
+            'zip':           _zipController.text.trim(),
+            'highSchool':    _highSchoolController.text.trim(),
+            'role':          _selectedRole,
+            'linkedin':      _linkedinController.text.trim(),
+            'source':        finalSource,
+            'referralEmail': referralEmail,
+            'resumeName':    _resumeFile!.name,
+            'suppDocName':   _suppFile!.name,
+            'birthDate':     _selectedBirthDate != null
                 ? _formatDate(_selectedBirthDate!)
                 : '',
           },
           resumeBytes: _resumeBytes!,
-          suppBytes:   _suppBytes!, 
+          suppBytes:   _suppBytes!,
         ),
       ),
     );
@@ -440,6 +445,7 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
     _linkedinController.dispose();
     _otherSourceController.dispose();
     _highSchoolController.dispose();
+    _referralEmailController.dispose();
     super.dispose();
   }
 
@@ -576,6 +582,81 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
                               const SizedBox(height: 15),
                               _NeonInput(label: "Please specify", controller: _otherSourceController, isOptional: false),
                             ],
+                            // ── Referral email field — visible only when "Referral" is selected ──
+                            AnimatedSize(
+                              duration: const Duration(milliseconds: 280),
+                              curve: Curves.easeInOut,
+                              child: _selectedSource == "Referral"
+                                  ? Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        const SizedBox(height: 15),
+                                        TextFormField(
+                                          controller: _referralEmailController,
+                                          style: const TextStyle(color: Colors.white),
+                                          keyboardType: TextInputType.emailAddress,
+                                          validator: (val) {
+                                            if (_selectedSource != "Referral") return null;
+                                            if (val == null || val.trim().isEmpty) {
+                                              return "Referral email is required";
+                                            }
+                                            if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(val.trim())) {
+                                              return "Please enter a valid email address";
+                                            }
+                                            return null;
+                                          },
+                                          decoration: InputDecoration(
+                                            labelText: "Referrer's DataTricks Account Email",
+                                            labelStyle: const TextStyle(color: Colors.white38),
+                                            hintText: "e.g. colleague@example.com",
+                                            hintStyle: TextStyle(color: Colors.white.withOpacity(0.18), fontSize: 13),
+                                            filled: true,
+                                            fillColor: const Color(0xFF6366F1).withOpacity(0.07),
+                                            prefixIcon: const Icon(Icons.person_outline_rounded, color: Color(0xFF6366F1), size: 18),
+                                            border: OutlineInputBorder(
+                                              borderRadius: BorderRadius.circular(8),
+                                              borderSide: BorderSide.none,
+                                            ),
+                                            focusedBorder: OutlineInputBorder(
+                                              borderRadius: BorderRadius.circular(8),
+                                              borderSide: const BorderSide(color: Color(0xFF6366F1), width: 1.5),
+                                            ),
+                                            enabledBorder: OutlineInputBorder(
+                                              borderRadius: BorderRadius.circular(8),
+                                              borderSide: BorderSide(color: const Color(0xFF6366F1).withOpacity(0.35), width: 1),
+                                            ),
+                                            errorStyle: const TextStyle(color: Colors.redAccent, height: 1),
+                                            suffixIcon: Container(
+                                              margin: const EdgeInsets.all(6),
+                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                              decoration: BoxDecoration(
+                                                color: const Color(0xFF6366F1).withOpacity(0.15),
+                                                borderRadius: BorderRadius.circular(6),
+                                              ),
+                                              child: const Text(
+                                                "Required",
+                                                style: TextStyle(color: Color(0xFF6366F1), fontSize: 10, fontWeight: FontWeight.w700),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(height: 8),
+                                        Row(
+                                          children: [
+                                            const Icon(Icons.info_outline_rounded, color: Color(0xFF6366F1), size: 13),
+                                            const SizedBox(width: 6),
+                                            Expanded(
+                                              child: Text(
+                                                "Enter the DataTricks account email of the person who referred you. This is required to credit their referral reward.",
+                                                style: TextStyle(color: Colors.white.withOpacity(0.45), fontSize: 11, height: 1.5),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    )
+                                  : const SizedBox.shrink(),
+                            ),
                             const SizedBox(height: 40),
 
                             _SectionHeader("Resume / CV"),

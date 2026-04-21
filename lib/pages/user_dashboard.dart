@@ -2,7 +2,6 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:share_plus/share_plus.dart';
 
 // ===========================================================================
 // DATATRICKS AI — PORTAL  (Glassmorphism / White Theme)
@@ -240,6 +239,7 @@ class _UserDashboardState extends State<UserDashboard> with TickerProviderStateM
               onToggle: _toggleNav,
               userData: _userData,
               onLogout: _logout,
+              userEmail: widget.userEmail,
             ),
           ),
           // ── Main ──
@@ -255,13 +255,13 @@ class _UserDashboardState extends State<UserDashboard> with TickerProviderStateM
   Widget _body() {
     switch (_active) {
       case _Nav.jobs:
-        return _JobsPage(opps: _opps, onSubmit: _submitInterest);
+        return _JobsPage(opps: _opps, onSubmit: _submitInterest, userEmail: widget.userEmail);
       case _Nav.explore:
         return _ExplorePage(opps: _opps, onSubmit: _submitInterest);
       case _Nav.inbox:
         return const _InboxPage();
       case _Nav.profile:
-        return _ProfilePage(userData: _userData!);
+        return _ProfilePage(userData: _userData!, userEmail: widget.userEmail);
       case _Nav.settings:
         return const _SettingsPage();
     }
@@ -280,6 +280,7 @@ class _Sidebar extends StatelessWidget {
   final VoidCallback onToggle;
   final Map<String, dynamic>? userData;
   final VoidCallback onLogout;
+  final String userEmail;
 
   const _Sidebar({
     required this.width, 
@@ -289,6 +290,7 @@ class _Sidebar extends StatelessWidget {
     required this.onToggle,
     required this.userData, 
     required this.onLogout,
+    required this.userEmail,
   });
 
   static const _items = [
@@ -370,7 +372,7 @@ class _Sidebar extends StatelessWidget {
                   const SizedBox(height: 8),
                   // Share button in sidebar
                   Builder(builder: (ctx) => GestureDetector(
-                    onTap: () => _shareCareerLink(ctx),
+                    onTap: () => _shareCareerLink(ctx, userEmail),
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 260),
                       margin: const EdgeInsets.symmetric(vertical: 4),
@@ -849,32 +851,355 @@ class _PopupStep extends StatelessWidget {
 }
 
 // ===========================================================================
-// SHARE CAREERS LINK
+// SHARE & EARN — REFERRAL COPY POPUP
 // ===========================================================================
 
 const _careersUrl = 'https://datatricksai.us/careers';
 
-void _shareCareerLink(BuildContext context) {
-  // Works on web (opens share sheet) and mobile via share_plus
-  try {
-    Share.share(
-      'Join me on DataTricks AI and start earning! Apply for exciting AI data projects here: $_careersUrl',
-      subject: 'Earn with DataTricks AI — Apply Now!',
+String _buildReferralMessage(String userEmail) =>
+    '🚀 Exciting Opportunity — Join DataTricks AI!\n\n'
+    'I\'m working on cutting-edge AI data projects with DataTricks AI and thought you\'d be a great fit. '
+    'They\'re hiring talented professionals for remote contract roles with competitive hourly rates.\n\n'
+    '👉 Apply here: $_careersUrl\n\n'
+    '📝 IMPORTANT: When filling out the application form, please enter my DataTricks account email '
+    'in the referral field — this ensures we\'re both recognised for the partnership.\n\n'
+    'My referral email: $userEmail\n\n'
+    'Looking forward to working alongside you!';
+
+void _shareCareerLink(BuildContext context, String userEmail) {
+  showGeneralDialog(
+    context: context,
+    barrierDismissible: true,
+    barrierLabel: 'Dismiss',
+    barrierColor: Colors.black.withOpacity(0.60),
+    transitionDuration: const Duration(milliseconds: 340),
+    transitionBuilder: (_, anim, __, child) {
+      final curved = CurvedAnimation(parent: anim, curve: Curves.easeOutBack);
+      return ScaleTransition(
+        scale: Tween<double>(begin: 0.80, end: 1.0).animate(curved),
+        child: FadeTransition(opacity: anim, child: child),
+      );
+    },
+    pageBuilder: (ctx, _, __) => _ReferralDialog(userEmail: userEmail),
+  );
+}
+
+class _ReferralDialog extends StatefulWidget {
+  final String userEmail;
+  const _ReferralDialog({required this.userEmail});
+
+  @override
+  State<_ReferralDialog> createState() => _ReferralDialogState();
+}
+
+class _ReferralDialogState extends State<_ReferralDialog> {
+  bool _copied = false;
+
+  void _handleCopy() async {
+    await Clipboard.setData(ClipboardData(text: _buildReferralMessage(widget.userEmail)));
+    setState(() => _copied = true);
+    await Future.delayed(const Duration(seconds: 2));
+    if (mounted) setState(() => _copied = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final screenW  = MediaQuery.of(context).size.width;
+    final screenH  = MediaQuery.of(context).size.height;
+    final isMobile = screenW < 600;
+    final dialogW  = isMobile ? screenW * 0.94 : 400.0;
+    final hPad     = isMobile ? 18.0 : 24.0;
+
+    return Center(
+      child: Material(
+        color: Colors.transparent,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: dialogW,
+            maxHeight: screenH * 0.88,
+          ),
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(24),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF6366F1).withOpacity(0.20),
+                  blurRadius: 40,
+                  spreadRadius: 2,
+                  offset: const Offset(0, 14),
+                ),
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.08),
+                  blurRadius: 20,
+                  offset: const Offset(0, 6),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+
+                // ── Gradient Header ────────────────────────────────────
+                Container(
+                  width: double.infinity,
+                  padding: EdgeInsets.fromLTRB(hPad, 22, hPad, 20),
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [Color(0xFF4F46E5), Color(0xFF7C3AED), Color(0xFF06B6D4)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+                  ),
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      // Decorative orb
+                      Positioned(
+                        right: -8, top: -8,
+                        child: Container(
+                          width: 70, height: 70,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.07),
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                      ),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            width: 44, height: 44,
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.18),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Icon(Icons.card_giftcard_rounded, color: Colors.white, size: 24),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Share & Earn',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.w900,
+                                    letterSpacing: -0.3,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withOpacity(0.20),
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  child: const Text(
+                                    '\$300 per successful referral',
+                                    style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          GestureDetector(
+                            onTap: () => Navigator.of(context).pop(),
+                            child: Container(
+                              width: 28, height: 28,
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.15),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(Icons.close_rounded, color: Colors.white, size: 15),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+
+                // ── Scrollable Body ────────────────────────────────────
+                Flexible(
+                  child: SingleChildScrollView(
+                    physics: const ClampingScrollPhysics(),
+                    padding: EdgeInsets.fromLTRB(hPad, 18, hPad, 22),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+
+                        // Terms label
+                        const Text(
+                          'REFERRAL TERMS',
+                          style: TextStyle(
+                            color: _textMuted,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 1.1,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+
+                        // Term rows — compact inline style
+                        _ReferralTerm(
+                          icon: Icons.monetization_on_rounded,
+                          iconColor: const Color(0xFF10B981),
+                          iconBg: const Color(0xFFD1FAE5),
+                          title: '\$300 reward',
+                          body: 'Earned for every person you refer who qualifies.',
+                        ),
+                        const SizedBox(height: 8),
+                        _ReferralTerm(
+                          icon: Icons.timer_rounded,
+                          iconColor: const Color(0xFF3B82F6),
+                          iconBg: const Color(0xFFEFF6FF),
+                          title: '10 hrs minimum',
+                          body: 'Referral qualifies after account creation + 10 hours of paid work.',
+                        ),
+                        const SizedBox(height: 8),
+                        _ReferralTerm(
+                          icon: Icons.alternate_email_rounded,
+                          iconColor: const Color(0xFF8B5CF6),
+                          iconBg: const Color(0xFFF5F3FF),
+                          title: 'Add your email',
+                          body: 'Referee must enter your DataTricks account email on the application form.',
+                        ),
+
+                        const SizedBox(height: 20),
+
+                        // ── Copy Button ────────────────────────────────
+                        SizedBox(
+                          width: double.infinity,
+                          child: GestureDetector(
+                            onTap: _copied ? null : _handleCopy,
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 250),
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              decoration: BoxDecoration(
+                                gradient: _copied
+                                    ? const LinearGradient(
+                                        colors: [Color(0xFF10B981), Color(0xFF059669)],
+                                        begin: Alignment.centerLeft,
+                                        end: Alignment.centerRight,
+                                      )
+                                    : const LinearGradient(
+                                        colors: [Color(0xFF4F46E5), Color(0xFF7C3AED)],
+                                        begin: Alignment.centerLeft,
+                                        end: Alignment.centerRight,
+                                      ),
+                                borderRadius: BorderRadius.circular(14),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: (_copied
+                                            ? const Color(0xFF10B981)
+                                            : const Color(0xFF4F46E5))
+                                        .withOpacity(0.30),
+                                    blurRadius: 14,
+                                    offset: const Offset(0, 4),
+                                  ),
+                                ],
+                              ),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  AnimatedSwitcher(
+                                    duration: const Duration(milliseconds: 200),
+                                    child: Icon(
+                                      _copied ? Icons.check_circle_rounded : Icons.copy_rounded,
+                                      color: Colors.white,
+                                      size: 17,
+                                      key: ValueKey(_copied),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  AnimatedSwitcher(
+                                    duration: const Duration(milliseconds: 200),
+                                    child: Text(
+                                      _copied ? 'Copied!' : 'Copy Invite Link',
+                                      key: ValueKey(_copied),
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
-  } catch (_) {
-    // Fallback: copy to clipboard
-    Clipboard.setData(const ClipboardData(text: _careersUrl));
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: const Text('Careers link copied to clipboard!'),
-      backgroundColor: _secondary,
-      behavior: SnackBarBehavior.floating,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-    ));
   }
 }
 
+class _ReferralTerm extends StatelessWidget {
+  final IconData icon;
+  final Color iconColor, iconBg;
+  final String title, body;
+
+  const _ReferralTerm({
+    required this.icon,
+    required this.iconColor,
+    required this.iconBg,
+    required this.title,
+    required this.body,
+  });
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+    decoration: BoxDecoration(
+      color: const Color(0xFFFAFAFC),
+      borderRadius: BorderRadius.circular(10),
+      border: Border.all(color: const Color(0xFFE8ECF0), width: 1.2),
+    ),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Container(
+          width: 32, height: 32,
+          decoration: BoxDecoration(color: iconBg, borderRadius: BorderRadius.circular(8)),
+          child: Icon(icon, color: iconColor, size: 16),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: RichText(
+            text: TextSpan(
+              children: [
+                TextSpan(
+                  text: '$title  ',
+                  style: const TextStyle(color: _textPrimary, fontWeight: FontWeight.w700, fontSize: 12),
+                ),
+                TextSpan(
+                  text: body,
+                  style: const TextStyle(color: _textSecondary, fontSize: 12, height: 1.4),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
 class _ShareBanner extends StatelessWidget {
-  const _ShareBanner();
+  final String userEmail;
+  const _ShareBanner({required this.userEmail});
 
   @override
   Widget build(BuildContext context) {
@@ -944,7 +1269,7 @@ class _ShareBanner extends StatelessWidget {
               ),
               const SizedBox(width: 10),
               GestureDetector(
-                onTap: () => _shareCareerLink(context),
+                onTap: () => _shareCareerLink(context, userEmail),
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
                   decoration: BoxDecoration(
@@ -955,9 +1280,9 @@ class _ShareBanner extends StatelessWidget {
                     ],
                   ),
                   child: Row(mainAxisSize: MainAxisSize.min, children: const [
-                    Icon(Icons.share_rounded, color: Color(0xFF6366F1), size: 15),
+                    Icon(Icons.card_giftcard_rounded, color: Color(0xFF6366F1), size: 15),
                     SizedBox(width: 6),
-                    Text('Share', style: TextStyle(color: Color(0xFF6366F1), fontWeight: FontWeight.w800, fontSize: 12)),
+                    Text('Refer & Earn', style: TextStyle(color: Color(0xFF6366F1), fontWeight: FontWeight.w800, fontSize: 12)),
                   ]),
                 ),
               ),
@@ -976,8 +1301,9 @@ class _ShareBanner extends StatelessWidget {
 class _JobsPage extends StatelessWidget {
   final List<_Opp> opps;
   final void Function(_Opp) onSubmit;
+  final String userEmail;
 
-  const _JobsPage({required this.opps, required this.onSubmit});
+  const _JobsPage({required this.opps, required this.onSubmit, required this.userEmail});
 
   @override
   Widget build(BuildContext context) {
@@ -991,7 +1317,7 @@ class _JobsPage extends StatelessWidget {
         const SizedBox(height: 20),
 
         // Share with friends CTA
-        const _ShareBanner(),
+        _ShareBanner(userEmail: userEmail),
         const SizedBox(height: 28),
 
         // Opportunities
@@ -1326,7 +1652,8 @@ class _MsgTile extends StatelessWidget {
 
 class _ProfilePage extends StatelessWidget {
   final Map<String, dynamic> userData;
-  const _ProfilePage({required this.userData});
+  final String userEmail;
+  const _ProfilePage({required this.userData, required this.userEmail});
 
   @override
   Widget build(BuildContext context) {
@@ -1436,7 +1763,7 @@ class _ProfilePage extends StatelessWidget {
           }
         }),
         const SizedBox(height: 20),
-        const _ShareBanner(),
+        _ShareBanner(userEmail: userEmail),
       ]),
     );
   }
