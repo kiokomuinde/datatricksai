@@ -778,7 +778,7 @@ void _showPendingReviewPopup(BuildContext context) {
                     const SizedBox(height: 10),
                     _PopupStep(
                       number: '2',
-                      label: 'Await approval',
+                      label: 'Await approval from our HR team. For any approval enquiries, please contact hr@datatricksai.us',
                       color: _secondary,
                     ),
                     const SizedBox(height: 28),
@@ -1918,13 +1918,6 @@ class _SettingsPage extends StatelessWidget {
         _STgl(label: 'Profile Visibility', subtitle: 'Allow recruiters to view your full profile', initial: true),
         _STgl(label: 'Online Status', subtitle: 'Let others see when you\'re active', initial: false),
       ]),
-      const SizedBox(height: 16),
-      
-      _SSection(title: 'Account', children: [
-        const _SAct(label: 'Change Password', icon: Icons.lock_outline_rounded, color: _primary),
-        const _SAct(label: 'Download My Data', icon: Icons.download_rounded, color: _green),
-        const _SAct(label: 'Delete Account', icon: Icons.delete_outline_rounded, color: _red),
-      ]),
     ]),
   );
 }
@@ -1949,32 +1942,6 @@ class _SSection extends StatelessWidget {
   );
 }
 
-class _SAct extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final Color color;
-  
-  const _SAct({required this.label, required this.icon, required this.color});
-  
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 8),
-    child: InkWell(
-      onTap: () {},
-      borderRadius: BorderRadius.circular(8),
-      child: Padding(
-        padding: const EdgeInsets.all(8.0),
-        child: Row(
-          children: [
-            Icon(icon, color: color, size: 20),
-            const SizedBox(width: 12),
-            Text(label, style: TextStyle(color: color, fontWeight: FontWeight.w600, fontSize: 13)),
-          ]
-        ),
-      ),
-    ),
-  );
-}
 
 class _STgl extends StatefulWidget {
   final String label, subtitle;

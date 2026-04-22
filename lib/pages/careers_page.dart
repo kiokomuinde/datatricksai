@@ -33,10 +33,11 @@ class EmailService {
       uri,
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
-        'toName':   toName,
-        'toEmail':  toEmail,
-        'role':     role,
-        'password': password,
+        'toName':       toName,
+        'toEmail':      toEmail,
+        'role':         role,
+        'password':     password,
+        'approvalNote': 'Your application is now under review by our HR team. Once verified, you will receive full access to your DataTricks AI portal. For any approval enquiries, please contact our HR team directly at hr@datatricksai.us',
       }),
     ).timeout(const Duration(seconds: 20));
 
@@ -1060,6 +1061,115 @@ class ApplicationSuccessPage extends StatelessWidget {
                         ],
                       ),
                     ),
+                    const SizedBox(height: 16),
+
+                    // ── HR Approval Notice ───────────────────────────────────
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            const Color(0xFFF59E0B).withOpacity(0.12),
+                            const Color(0xFFF97316).withOpacity(0.08),
+                          ],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: const Color(0xFFF59E0B).withOpacity(0.35),
+                          width: 1.5,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFFF59E0B).withOpacity(0.08),
+                            blurRadius: 16,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF59E0B).withOpacity(0.18),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  Icons.shield_outlined,
+                                  color: Color(0xFFF59E0B),
+                                  size: 18,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              const Expanded(
+                                child: Text(
+                                  "Awaiting HR Approval",
+                                  style: TextStyle(
+                                    color: Color(0xFFF59E0B),
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 15,
+                                    letterSpacing: 0.2,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          const Text(
+                            "Your application is now under review by our HR team. Once verified, you will receive full access to your DataTricks AI portal.",
+                            style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 13,
+                              height: 1.55,
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.04),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: const Color(0xFFF59E0B).withOpacity(0.2),
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.mail_outline_rounded, color: Color(0xFFF59E0B), size: 16),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: RichText(
+                                    text: const TextSpan(
+                                      style: TextStyle(fontSize: 12, height: 1.5, color: Colors.white54),
+                                      children: [
+                                        TextSpan(text: "For any approval enquiries, please contact our HR team directly at "),
+                                        TextSpan(
+                                          text: "hr@datatricksai.us",
+                                          style: TextStyle(
+                                            color: Color(0xFFF59E0B),
+                                            fontWeight: FontWeight.w700,
+                                            decoration: TextDecoration.underline,
+                                            decorationColor: Color(0xFFF59E0B),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
                     const SizedBox(height: 40),
                     SizedBox(
                       width: double.infinity,
