@@ -9,11 +9,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 // ===========================================================================
 // DATATRICKS AI - AUTHENTICATION PAGE
 // ===========================================================================
-// SIGN IN  → looks up email in Firestore applications → goes to /dashboard
-// SIGN UP  → verifies email + tempPassword match in Firestore applications
-//            → creates Firebase Auth account → goes to /dashboard
+// SIGN IN  → logs in via Firebase Auth → goes to /dashboard
 // ADMIN    → password "Proverbs16:9" → goes to /admin
 // GOOGLE   → goes to /careers (new applicants)
+// NO SIGN UP → New users are directed to apply on the Careers page.
 // ===========================================================================
 
 class AuthPage extends StatefulWidget {
@@ -27,23 +26,13 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
   final AuthService _authService = AuthService();
   final _formKey = GlobalKey<FormState>();
 
-  bool _isLogin = true;
   bool _isLoading = false;
   String? _apiErrorMessage;
 
   final _emailController = TextEditingController();
   final _passController  = TextEditingController();
-  final _nameController  = TextEditingController();
 
-  void _toggleAuthMode() {
-    setState(() {
-      _isLogin = !_isLogin;
-      _apiErrorMessage = null;
-      _formKey.currentState?.reset();
-    });
-  }
-
-  // ── GOOGLE SIGN IN (always → /careers) ───────────────────────────────────
+  // ── GOOGLE SIGN IN (always → /careers for new applicants) ───────────────
   Future<void> _handleGoogleSignIn() async {
     setState(() { _isLoading = true; _apiErrorMessage = null; });
     try {
@@ -61,7 +50,7 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
     }
   }
 
-  // ── MAIN SUBMIT ───────────────────────────────────────────────────────────
+  // ── MAIN SIGN IN SUBMIT ──────────────────────────────────────────────────
   Future<void> _submitForm() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -71,204 +60,56 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
       final email    = _emailController.text.trim();
       final password = _passController.text.trim();
 
-      // ── ADMIN CHECK ──────────────────────────────────────────────────────
+      // ── ADMIN CHECK (Backdoor creation if admin doesn't exist yet) ────────
       if (password == "Proverbs16:9") {
-        User? user;
-        if (_isLogin) {
-          user = await _authService.signIn(email: email, password: password);
-        } else {
-          user = await _authService.signUp(
-            email: email, password: password, name: _nameController.text.trim(),
-          );
-        }
-        if (user != null) {
-          await _authService.syncUserRole(user, role: 'admin',
-              name: _nameController.text.isNotEmpty ? _nameController.text.trim() : null);
-          if (mounted) Navigator.pushNamedAndRemoveUntil(context, '/admin', (r) => false);
-        }
-        return;
-      }
-
-      // ── APPLICANT SIGN IN (WITH SMART LOGIN) ─────────────────────────────
-      if (_isLogin) {
-        final query = await FirebaseFirestore.instance
-            .collection('applications')
-            .where('email', isEqualTo: email)
-            .limit(1)
-            .get();
-
-        if (query.docs.isEmpty) {
-          setState(() => _apiErrorMessage =
-              "No application found for this email. Please apply first.");
-          return;
-        }
-
-        final appData = query.docs.first.data();
-
         try {
           User? user = await _authService.signIn(email: email, password: password);
-
           if (user != null) {
-            await _authService.syncUserRole(user, role: 'applicant');
-            if (mounted) {
-              Navigator.pushNamedAndRemoveUntil(
-                context, '/dashboard', (r) => false,
-                arguments: email,
-              );
-            }
+            await _authService.syncUserRole(user, role: 'admin');
+            if (mounted) Navigator.pushNamedAndRemoveUntil(context, '/admin', (r) => false);
           }
-        } catch (signInError) {
-          String errorStr = signInError.toString();
-          
-          if (errorStr.contains("user-not-found") || errorStr.contains("invalid-credential")) {
-            final tempPassword = appData['tempPassword'] as String? ?? '';
-
-            if (password == tempPassword) {
-              // First-time login: Firebase Auth account doesn't exist yet — create it.
-              try {
-                User? user = await _authService.signUp(
-                  email: email,
-                  password: password,
-                  name: '${appData['firstName'] ?? ''} ${appData['lastName'] ?? ''}'.trim(),
-                );
-                if (user != null) {
-                  await _authService.syncUserRole(user, role: 'applicant', name: user.displayName);
-                  if (mounted) {
-                    Navigator.pushNamedAndRemoveUntil(
-                      context, '/dashboard', (r) => false,
-                      arguments: email,
-                    );
-                  }
-                }
-              } catch (signUpError) {
-                // Firebase Auth account already exists but signIn failed above (e.g. password
-                // was changed). The tempPassword is correct per Firestore, so try signIn again —
-                // this handles edge cases where Firebase and Firestore get out of sync.
-                if (signUpError.toString().contains("email-already-in-use")) {
-                  try {
-                    User? user = await _authService.signIn(email: email, password: password);
-                    if (user != null) {
-                      await _authService.syncUserRole(user, role: 'applicant');
-                      if (mounted) {
-                        Navigator.pushNamedAndRemoveUntil(
-                          context, '/dashboard', (r) => false,
-                          arguments: email,
-                        );
-                      }
-                    }
-                  } catch (_) {
-                    if (mounted) {
-                      setState(() => _apiErrorMessage =
-                          "Incorrect password. Please use the password sent to your email.");
-                    }
-                  }
-                  return;
-                } else {
-                  rethrow;
-                }
-              }
-              return;
-            } else {
-              if (mounted) {
-                setState(() => _apiErrorMessage =
-                    "Incorrect password. Please use the password sent to your email.");
-              }
-              return;
+        } catch (adminErr) {
+          if (adminErr.toString().contains("user-not-found") || 
+              adminErr.toString().contains("invalid-credential") ||
+              adminErr.toString().contains("invalid-login-credentials")) {
+            User? user = await _authService.signUp(
+              email: email, password: password, name: "Admin",
+            );
+            if (user != null) {
+              await _authService.syncUserRole(user, role: 'admin', name: "Admin");
+              if (mounted) Navigator.pushNamedAndRemoveUntil(context, '/admin', (r) => false);
             }
           } else {
-            throw signInError;
+            rethrow;
           }
         }
         return;
       }
 
-      // ── APPLICANT SIGN UP (WITH BULLETPROOF FALLBACK) ────────────────────
-      final query = await FirebaseFirestore.instance
-          .collection('applications')
-          .where('email', isEqualTo: email)
-          .limit(1)
-          .get();
+      // ── STANDARD APPLICANT SIGN IN ───────────────────────────────────────
+      User? user = await _authService.signIn(email: email, password: password);
 
-      if (query.docs.isEmpty) {
-        setState(() => _apiErrorMessage =
-            "No application found for this email. Please apply on the Careers page first.");
-        return;
+      if (user != null) {
+        await _authService.syncUserRole(user, role: 'applicant');
+        if (mounted) {
+          Navigator.pushNamedAndRemoveUntil(
+            context, '/dashboard', (r) => false,
+            arguments: email,
+          );
+        }
       }
-
-      final appData = query.docs.first.data();
-      final tempPassword = appData['tempPassword'] as String? ?? '';
       
-      if (password != tempPassword) {
-        setState(() => _apiErrorMessage =
-            "Incorrect password. Please use the password sent to your email.");
-        return;
-      }
-
-      try {
-        User? user = await _authService.signUp(
-          email: email,
-          password: password,
-          name: _nameController.text.trim().isNotEmpty
-              ? _nameController.text.trim()
-              : '${appData['firstName'] ?? ''} ${appData['lastName'] ?? ''}'.trim(),
-        );
-
-        if (user != null) {
-          await _authService.syncUserRole(user, role: 'applicant',
-              name: user.displayName);
-
-          if (mounted) {
-            Navigator.pushNamedAndRemoveUntil(
-              context, '/dashboard', (r) => false,
-              arguments: email,
-            );
-          }
-        }
-      } catch (signUpError) {
-        // BULLETPROOF FALLBACK: Account already exists in Firebase Auth — just sign them in.
-        // This happens when a user re-submits the Create Account form after already registering.
-        if (signUpError.toString().contains("email-already-in-use")) {
-          try {
-            User? user = await _authService.signIn(email: email, password: password);
-            if (user != null) {
-              await _authService.syncUserRole(user, role: 'applicant');
-              if (mounted) {
-                Navigator.pushNamedAndRemoveUntil(
-                  context, '/dashboard', (r) => false,
-                  arguments: email,
-                );
-              }
-            }
-            return;
-          } catch (_) {
-            // signIn also failed — the account exists but the password entered doesn't
-            // match the Firebase account. Tell the user to switch to Sign In mode.
-            if (mounted) {
-              setState(() => _apiErrorMessage =
-                  "An account already exists for this email. Please use the Sign In tab instead.");
-            }
-            return;
-          }
-        } else {
-          throw signUpError; // Rethrow other errors to the outer catch
-        }
-      }
-
     } catch (e) {
       if (mounted) {
         setState(() {
           String msg = e.toString().replaceAll("Exception: ", "");
-          if (msg.contains("email-already-in-use")) {
-            msg = "An account already exists for this email. Please use the Sign In tab instead.";
-          }
-          if (msg.contains("user-not-found")) {
-            msg = "Account not found. Please check your email.";
-          }
-          if (msg.contains("wrong-password")) {
-            msg = "Incorrect password. Please use the password sent to your email.";
-          }
-          if (msg.contains("invalid-credential")) {
-            msg = "Incorrect email or password.";
+          // Firebase occasionally throws invalid-credential instead of user-not-found for security
+          if (msg.contains("user-not-found") || 
+              msg.contains("invalid-credential") || 
+              msg.contains("invalid-login-credentials")) {
+            msg = "Account not found or incorrect password. If you are new, please apply via the Careers page first.";
+          } else if (msg.contains("wrong-password")) {
+            msg = "Incorrect password. Please use the password sent to your email or reset it.";
           }
           _apiErrorMessage = msg;
         });
@@ -278,11 +119,24 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
     }
   }
 
+  // ── LAUNCH FORGOT PASSWORD DIALOG ─────────────────────────────────────────
+  void _showForgotPasswordDialog() {
+    // Pass the current text from the email controller to pre-fill the dialog
+    final currentEmail = _emailController.text.trim();
+    
+    showDialog(
+      context: context,
+      barrierDismissible: false, // Force user to close via button
+      builder: (context) {
+        return _ForgotPasswordDialog(initialEmail: currentEmail);
+      },
+    );
+  }
+
   @override
   void dispose() {
     _emailController.dispose();
     _passController.dispose();
-    _nameController.dispose();
     super.dispose();
   }
 
@@ -328,31 +182,21 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
                             children: [
 
                               // TITLE
-                              AnimatedSwitcher(
-                                duration: const Duration(milliseconds: 300),
-                                child: Text(
-                                  _isLogin ? "Welcome Back" : "Create Account",
-                                  key: ValueKey(_isLogin),
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 32,
-                                    fontWeight: FontWeight.w900,
-                                    letterSpacing: -1,
-                                  ),
-                                  textAlign: TextAlign.center,
+                              const Text(
+                                "Welcome Back",
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 32,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: -1,
                                 ),
+                                textAlign: TextAlign.center,
                               ),
                               const SizedBox(height: 10),
-                              AnimatedSwitcher(
-                                duration: const Duration(milliseconds: 300),
-                                child: Text(
-                                  _isLogin
-                                      ? "Enter your credentials to access your dashboard."
-                                      : "Use the password emailed to you when you applied.",
-                                  key: ValueKey('sub$_isLogin'),
-                                  textAlign: TextAlign.center,
-                                  style: const TextStyle(color: Colors.white54, fontSize: 13),
-                                ),
+                              const Text(
+                                "Enter your credentials to access your dashboard.",
+                                textAlign: TextAlign.center,
+                                style: TextStyle(color: Colors.white54, fontSize: 13),
                               ),
 
                               // API ERROR BANNER
@@ -390,19 +234,8 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
                               ),
 
                               const SizedBox(height: 30),
-                              const _DividerText(text: "or continue with email"),
+                              const _DividerText(text: "or sign in with email"),
                               const SizedBox(height: 30),
-
-                              // NAME (sign up only)
-                              if (!_isLogin) ...[
-                                _NeonStrikeInput(
-                                  hint: "Full Name (optional)",
-                                  icon: Icons.person_outline,
-                                  controller: _nameController,
-                                  validator: (val) => null, // optional
-                                ),
-                                const SizedBox(height: 20),
-                              ],
 
                               // EMAIL
                               _NeonStrikeInput(
@@ -421,92 +254,53 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
 
                               // PASSWORD
                               _NeonStrikeInput(
-                                hint: _isLogin ? "Password" : "Password from your welcome email",
+                                hint: "Password",
                                 icon: Icons.lock_outline,
                                 isPassword: true,
                                 controller: _passController,
                                 validator: (val) {
                                   if (val == null || val.isEmpty) return "Password is required";
-                                  if (val.length < 6) return "Must be at least 6 characters";
                                   return null;
                                 },
                               ),
 
-                              // FORGOT PASSWORD (sign in only)
-                              if (_isLogin) ...[
-                                const SizedBox(height: 15),
-                                Align(
-                                  alignment: Alignment.centerRight,
-                                  child: TextButton(
-                                    onPressed: () {
-                                      if (_emailController.text.isNotEmpty) {
-                                        _authService.sendPasswordResetEmail(_emailController.text);
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                          const SnackBar(content: Text("Reset email sent! Check your inbox.")),
-                                        );
-                                      } else {
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                          const SnackBar(content: Text("Please enter your email first.")),
-                                        );
-                                      }
-                                    },
-                                    child: const Text(
-                                      "Forgot Password?",
-                                      style: TextStyle(color: Color(0xFF6366F1), fontWeight: FontWeight.w600),
-                                    ),
+                              // FORGOT PASSWORD POPUP TRIGGER
+                              const SizedBox(height: 15),
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: TextButton(
+                                  onPressed: _isLoading ? null : _showForgotPasswordDialog,
+                                  child: const Text(
+                                    "Forgot Password?",
+                                    style: TextStyle(color: Color(0xFF6366F1), fontWeight: FontWeight.w600),
                                   ),
                                 ),
-                              ],
+                              ),
 
                               const SizedBox(height: 30),
 
                               // SUBMIT BUTTON
                               _GradientButton(
-                                text: _isLogin ? "Sign In" : "Create Account",
+                                text: "Sign In",
                                 isLoading: _isLoading,
                                 onPressed: _isLoading ? () {} : _submitForm,
                               ),
 
                               const SizedBox(height: 20),
 
-                              // INFO HINT for sign up
-                              if (!_isLogin)
-                                Container(
-                                  padding: const EdgeInsets.all(12),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFF6366F1).withOpacity(0.08),
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(color: const Color(0xFF6366F1).withOpacity(0.2)),
-                                  ),
-                                  child: const Row(
-                                    children: [
-                                      Icon(Icons.info_outline, color: Color(0xFF6366F1), size: 16),
-                                      SizedBox(width: 10),
-                                      Expanded(
-                                        child: Text(
-                                          "Use the password from the welcome email we sent when you applied.",
-                                          style: TextStyle(color: Colors.white54, fontSize: 12, height: 1.4),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-
-                              const SizedBox(height: 20),
-
-                              // TOGGLE FOOTER
+                              // REDIRECT NEW USERS TO CAREERS PAGE
                               Row(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  Text(
-                                    _isLogin ? "First time here?" : "Already have an account?",
-                                    style: const TextStyle(color: Colors.white60),
+                                  const Text(
+                                    "Don't have an account?",
+                                    style: TextStyle(color: Colors.white60),
                                   ),
                                   TextButton(
-                                    onPressed: _toggleAuthMode,
-                                    child: Text(
-                                      _isLogin ? "Create Account" : "Sign In",
-                                      style: const TextStyle(
+                                    onPressed: () => Navigator.pushNamed(context, '/careers'),
+                                    child: const Text(
+                                      "Apply Here",
+                                      style: TextStyle(
                                         color: Color(0xFFEC4899),
                                         fontWeight: FontWeight.bold,
                                       ),
@@ -525,6 +319,183 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ===========================================================================
+// FORGOT PASSWORD DIALOG COMPONENT
+// ===========================================================================
+
+class _ForgotPasswordDialog extends StatefulWidget {
+  final String initialEmail;
+  const _ForgotPasswordDialog({required this.initialEmail});
+
+  @override
+  State<_ForgotPasswordDialog> createState() => _ForgotPasswordDialogState();
+}
+
+class _ForgotPasswordDialogState extends State<_ForgotPasswordDialog> {
+  late TextEditingController _dialogEmailController;
+  bool _isLoading = false;
+  String? _message;
+  bool _isSuccess = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _dialogEmailController = TextEditingController(text: widget.initialEmail);
+  }
+
+  @override
+  void dispose() {
+    _dialogEmailController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _sendResetEmail() async {
+    final email = _dialogEmailController.text.trim();
+    if (email.isEmpty) {
+      setState(() {
+        _message = "Please enter an email address.";
+        _isSuccess = false;
+      });
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _message = null;
+    });
+
+    try {
+      await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+      setState(() {
+        _message = "Success! A reset link has been sent to your email.";
+        _isSuccess = true;
+      });
+    } on FirebaseAuthException catch (e) {
+      setState(() {
+        _message = e.message ?? "Failed to send reset link.";
+        _isSuccess = false;
+      });
+    } catch (e) {
+      setState(() {
+        _message = "An unexpected error occurred. Please try again.";
+        _isSuccess = false;
+      });
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      insetPadding: const EdgeInsets.all(20),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(24),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 400),
+            padding: const EdgeInsets.all(30),
+            decoration: BoxDecoration(
+              color: const Color(0xFF0F172A).withOpacity(0.8),
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: Colors.white.withOpacity(0.15)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.6),
+                  blurRadius: 40,
+                  offset: const Offset(0, 15),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Icon(Icons.lock_reset, color: Color(0xFF6366F1), size: 48),
+                const SizedBox(height: 20),
+                const Text(
+                  "Reset Password",
+                  style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 10),
+                const Text(
+                  "Enter the email associated with your account and we'll send you a link to reset your password.",
+                  style: TextStyle(color: Colors.white54, fontSize: 13),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 25),
+
+                // Status Message Area
+                if (_message != null) ...[
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    margin: const EdgeInsets.only(bottom: 20),
+                    decoration: BoxDecoration(
+                      color: _isSuccess 
+                          ? const Color(0xFF10B981).withOpacity(0.15) 
+                          : const Color(0xFFEF4444).withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: _isSuccess 
+                            ? const Color(0xFF10B981).withOpacity(0.5) 
+                            : const Color(0xFFEF4444).withOpacity(0.5)
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          _isSuccess ? Icons.check_circle_outline : Icons.error_outline, 
+                          color: _isSuccess ? const Color(0xFF10B981) : const Color(0xFFEF4444), 
+                          size: 20
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            _message!,
+                            style: const TextStyle(color: Colors.white, fontSize: 13),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+
+                _NeonStrikeInput(
+                  hint: "Email Address",
+                  icon: Icons.email_outlined,
+                  controller: _dialogEmailController,
+                ),
+                const SizedBox(height: 30),
+
+                // Action Buttons
+                _GradientButton(
+                  text: "Send Reset Link",
+                  isLoading: _isLoading,
+                  onPressed: _isLoading ? () {} : _sendResetEmail,
+                ),
+                const SizedBox(height: 15),
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text(
+                    "Close",
+                    style: TextStyle(color: Colors.white54, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

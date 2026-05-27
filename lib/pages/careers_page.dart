@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:http/http.dart' as http; 
 import 'package:cloud_firestore/cloud_firestore.dart'; 
+import 'package:firebase_auth/firebase_auth.dart'; // <-- ADDED FIREBASE AUTH
 import 'package:share_plus/share_plus.dart'; 
 
 // ===========================================================================
@@ -42,8 +43,8 @@ class EmailService {
     ).timeout(const Duration(seconds: 20));
 
     if (response.statusCode != 200) {
-      debugPrint('Email backend error \${response.statusCode}: \${response.body}');
-      throw Exception('Failed to send welcome email (\${response.statusCode}).');
+      debugPrint('Email backend error ${response.statusCode}: ${response.body}');
+      throw Exception('Failed to send welcome email (${response.statusCode}).');
     }
   }
 }
@@ -832,13 +833,34 @@ class _WaitingPageState extends State<WaitingPage> {
       String? suppUrl = await _uploadToCloudinary(widget.suppBytes, widget.formData['suppDocName']);
       if (suppUrl == null) throw Exception("Failed to upload supporting document. Please try again.");
 
-      // ── STEP 4: Generate a secure random password ─────────────────────────
-      _setStatus("Creating your account...");
+      // ── STEP 4: Generate a secure random password & Create Auth Account ──
+      _setStatus("Creating your account securely...");
       final String generatedPassword = PasswordGenerator.generate();
 
-      // ── STEP 5: Save to Firestore (includes hashed password reference) ────
+      UserCredential? userCredential;
+      try {
+        // Create the user account directly in Firebase Authentication
+        userCredential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
+          email: widget.formData['email'],
+          password: generatedPassword,
+        );
+      } on FirebaseAuthException catch (e) {
+        if (e.code == 'email-already-in-use') {
+          throw Exception("An account or application with this email already exists.");
+        }
+        throw Exception("Account creation failed: ${e.message}");
+      }
+
+      // ── STEP 5: Save to Firestore (Secured) ───────────────────────────────
       _setStatus("Saving your application...");
-      await FirebaseFirestore.instance.collection('applications').add({
+      
+      // Best Practice: Save the application document using the new user's Auth UID.
+      // Notice: 'tempPassword' has been completely removed for security!
+      await FirebaseFirestore.instance
+          .collection('applications')
+          .doc(userCredential.user!.uid) 
+          .set({
+        'uid':         userCredential.user!.uid, 
         'firstName':   widget.formData['firstName'],
         'lastName':    widget.formData['lastName'],
         'email':       widget.formData['email'],
@@ -859,8 +881,6 @@ class _WaitingPageState extends State<WaitingPage> {
         'birthDate':   widget.formData['birthDate'],
         'appliedAt':   FieldValue.serverTimestamp(),
         'status':      'pending',
-        // Password stored for reference — in production consider Firebase Auth instead
-        'tempPassword': generatedPassword,
       });
 
       // ── STEP 6: Send welcome email with password via EmailJS ──────────────

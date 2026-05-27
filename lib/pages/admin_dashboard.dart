@@ -64,6 +64,142 @@ class _AdminDashboardState extends State<AdminDashboard> with TickerProviderStat
     });
   }
 
+  // VERIFY / UNVERIFY A USER  — shows confirmation popup first
+  Future<void> _verifyUser(
+    String docId,
+    String currentStatus,
+    String fullName,
+    String email,
+  ) async {
+    final newStatus = currentStatus == 'approved' ? 'pending' : 'approved';
+    final isApproving = newStatus == 'approved';
+
+    // Show confirmation popup — wait for admin's decision
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: true,
+      barrierColor: Colors.black.withValues(alpha: 0.7),
+      builder: (ctx) => _VerifyConfirmDialog(
+        fullName: fullName,
+        email: email,
+        isApproving: isApproving,
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('applications')
+          .doc(docId)
+          .update({
+        'status': newStatus,
+        'verifiedAt': isApproving
+            ? FieldValue.serverTimestamp()
+            : FieldValue.delete(),
+        'verifiedBy': isApproving
+            ? FirebaseAuth.instance.currentUser?.uid
+            : FieldValue.delete(),
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Row(children: [
+            Icon(
+              isApproving ? Icons.verified_rounded : Icons.undo_rounded,
+              color: Colors.white,
+              size: 18,
+            ),
+            const SizedBox(width: 10),
+            Text(
+              isApproving
+                  ? '$fullName has been verified'
+                  : '$fullName has been set back to pending',
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ]),
+          backgroundColor:
+              isApproving ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          margin: const EdgeInsets.all(20),
+          duration: const Duration(seconds: 4),
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Error: $e'),
+          backgroundColor: Colors.redAccent,
+        ));
+      }
+    }
+  }
+
+  // GRADE EXAM — shows Pass/Fail popup then writes to Firestore
+  Future<void> _gradeExam(
+    String docId,
+    String fullName,
+    String email,
+    String currentExamStatus,
+  ) async {
+    final result = await showDialog<String>(
+      context: context,
+      barrierDismissible: true,
+      barrierColor: Colors.black.withValues(alpha: 0.75),
+      builder: (ctx) => _ExamGradeDialog(
+        fullName: fullName,
+        email: email,
+        currentExamStatus: currentExamStatus,
+      ),
+    );
+
+    if (result == null || !mounted) return;
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('applications')
+          .doc(docId)
+          .update({
+        'onboardingExam.status'   : result,
+        'onboardingExam.gradedAt' : FieldValue.serverTimestamp(),
+        'onboardingExam.gradedBy' : FirebaseAuth.instance.currentUser?.uid,
+      });
+
+      if (mounted) {
+        final passed = result == 'passed';
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Row(children: [
+            Icon(
+              passed ? Icons.check_circle_rounded : Icons.cancel_rounded,
+              color: Colors.white,
+              size: 18,
+            ),
+            const SizedBox(width: 10),
+            Text(
+              passed
+                  ? '$fullName marked as PASSED'
+                  : '$fullName marked as FAILED',
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ]),
+          backgroundColor: passed ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          margin: const EdgeInsets.all(20),
+          duration: const Duration(seconds: 4),
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Error grading exam: $e'),
+          backgroundColor: Colors.redAccent,
+        ));
+      }
+    }
+  }
+
   // DELETE SINGLE RECORD
   Future<void> _deleteRecord(String docId) async {
     bool confirm = await _showDeleteConfirmDialog("Delete this application?");
@@ -109,7 +245,7 @@ class _AdminDashboardState extends State<AdminDashboard> with TickerProviderStat
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF0F172A),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: Colors.white.withOpacity(0.1))),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: Colors.white.withValues(alpha: 0.1))),
         title: Text(title, style: const TextStyle(color: Colors.white)),
         content: const Text("This action cannot be undone.", style: TextStyle(color: Colors.white70)),
         actions: [
@@ -186,7 +322,7 @@ class _AdminDashboardState extends State<AdminDashboard> with TickerProviderStat
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Icon(Icons.inbox_outlined, size: 60, color: Colors.white.withOpacity(0.2)),
+                            Icon(Icons.inbox_outlined, size: 60, color: Colors.white.withValues(alpha: 0.2)),
                             const SizedBox(height: 20),
                             const Text("No applications received yet.", style: TextStyle(color: Colors.white54)),
                           ],
@@ -217,6 +353,18 @@ class _AdminDashboardState extends State<AdminDashboard> with TickerProviderStat
                                 isSelected: isSelected,
                                 onSelect: () => _toggleSelection(docId),
                                 onDelete: () => _deleteRecord(docId),
+                                onVerify: () => _verifyUser(
+                                  docId,
+                                  (data['status'] ?? 'pending') as String,
+                                  '${data['firstName'] ?? ''} ${data['lastName'] ?? ''}'.trim(),
+                                  (data['email'] ?? 'No Email') as String,
+                                ),
+                                onGradeExam: () => _gradeExam(
+                                  docId,
+                                  '${data['firstName'] ?? ''} ${data['lastName'] ?? ''}'.trim(),
+                                  (data['email'] ?? 'No Email') as String,
+                                  (data['onboardingExam'] as Map<String, dynamic>?)?['status'] as String? ?? 'pending_review',
+                                ),
                               );
                             },
                           );
@@ -263,8 +411,8 @@ class _AdminNavbar extends StatelessWidget {
           height: 90, 
           padding: const EdgeInsets.symmetric(horizontal: 40),
           decoration: BoxDecoration(
-            border: Border(bottom: BorderSide(color: Colors.white.withOpacity(0.08))),
-            color: Colors.black.withOpacity(0.4),
+            border: Border(bottom: BorderSide(color: Colors.white.withValues(alpha: 0.08))),
+            color: Colors.black.withValues(alpha: 0.4),
           ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -320,10 +468,10 @@ class _AdminNavbar extends StatelessWidget {
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                         decoration: BoxDecoration(
-                          color: isAllSelected ? const Color(0xFF6366F1).withOpacity(0.1) : Colors.white.withOpacity(0.05),
+                          color: isAllSelected ? const Color(0xFF6366F1).withValues(alpha: 0.1) : Colors.white.withValues(alpha: 0.05),
                           borderRadius: BorderRadius.circular(30),
                           border: Border.all(
-                            color: isAllSelected ? const Color(0xFF6366F1) : Colors.white.withOpacity(0.2)
+                            color: isAllSelected ? const Color(0xFF6366F1) : Colors.white.withValues(alpha: 0.2)
                           ),
                         ),
                         child: Row(
@@ -357,9 +505,9 @@ class _AdminNavbar extends StatelessWidget {
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                         decoration: BoxDecoration(
-                          color: Colors.redAccent.withOpacity(0.1),
+                          color: Colors.redAccent.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(30),
-                          border: Border.all(color: Colors.redAccent.withOpacity(0.5)),
+                          border: Border.all(color: Colors.redAccent.withValues(alpha: 0.5)),
                         ),
                         child: Row(
                           children: [
@@ -383,11 +531,11 @@ class _AdminNavbar extends StatelessWidget {
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.03),
+                        color: Colors.white.withValues(alpha: 0.03),
                         borderRadius: BorderRadius.circular(30),
-                        border: Border.all(color: Colors.redAccent.withOpacity(0.3)),
+                        border: Border.all(color: Colors.redAccent.withValues(alpha: 0.3)),
                         boxShadow: [
-                          BoxShadow(color: Colors.redAccent.withOpacity(0.1), blurRadius: 10, spreadRadius: -2)
+                          BoxShadow(color: Colors.redAccent.withValues(alpha: 0.1), blurRadius: 10, spreadRadius: -2)
                         ],
                       ),
                       child: Row(
@@ -485,7 +633,7 @@ class _SmokePainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     for (var p in particles) {
       final paint = Paint()
-        ..color = p.color.withOpacity(p.life * 0.4) 
+        ..color = p.color.withValues(alpha: p.life * 0.4) 
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3.0); 
       canvas.drawCircle(Offset(p.x, p.y), p.size, paint);
     }
@@ -504,6 +652,8 @@ class _ApplicationCard extends StatelessWidget {
   final bool isSelected;
   final VoidCallback onSelect;
   final VoidCallback onDelete;
+  final VoidCallback onVerify;
+  final VoidCallback onGradeExam;
 
   const _ApplicationCard({
     required this.data, 
@@ -511,6 +661,8 @@ class _ApplicationCard extends StatelessWidget {
     required this.isSelected,
     required this.onSelect,
     required this.onDelete,
+    required this.onVerify,
+    required this.onGradeExam,
   });
 
   // ---------------------------------------------------------------------------
@@ -558,19 +710,28 @@ class _ApplicationCard extends StatelessWidget {
     final String resumeUrl = data['resumeUrl'] ?? '';
     final String suppUrl = data['suppDocUrl'] ?? '';
     final String date = _formatTimestamp(data['appliedAt']);
+    final String status = data['status'] ?? 'pending';
+    final bool isApproved = status == 'approved';
+
+    // Exam data
+    final Map<String, dynamic>? examData = data['onboardingExam'] as Map<String, dynamic>?;
+    final String examStatus = examData?['status'] as String? ?? '';
+    final bool hasExam = examStatus.isNotEmpty;
+    final bool examPassed  = examStatus == 'passed';
+    final bool examFailed  = examStatus == 'failed';
 
     return Container(
       decoration: BoxDecoration(
         color: isSelected 
-            ? const Color(0xFF6366F1).withOpacity(0.15) // Highlight if selected
-            : const Color(0xFF0F172A).withOpacity(0.6),
+            ? const Color(0xFF6366F1).withValues(alpha: 0.15) // Highlight if selected
+            : const Color(0xFF0F172A).withValues(alpha: 0.6),
         borderRadius: BorderRadius.circular(24),
         border: Border.all(
-          color: isSelected ? const Color(0xFF6366F1) : Colors.white.withOpacity(0.08),
+          color: isSelected ? const Color(0xFF6366F1) : Colors.white.withValues(alpha: 0.08),
           width: isSelected ? 2 : 1,
         ),
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 20, offset: const Offset(0, 10))
+          BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 20, offset: const Offset(0, 10))
         ],
       ),
       child: ClipRRect(
@@ -606,7 +767,7 @@ class _ApplicationCard extends StatelessWidget {
                     Expanded(
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                        decoration: BoxDecoration(color: const Color(0xFF6366F1).withOpacity(0.15), borderRadius: BorderRadius.circular(8)),
+                        decoration: BoxDecoration(color: const Color(0xFF6366F1).withValues(alpha: 0.15), borderRadius: BorderRadius.circular(8)),
                         child: Text(
                           role.toUpperCase(), 
                           style: const TextStyle(color: Color(0xFF6366F1), fontWeight: FontWeight.bold, fontSize: 11, letterSpacing: 0.5), 
@@ -615,10 +776,8 @@ class _ApplicationCard extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    Container(
-                      height: 8, width: 8, 
-                      decoration: const BoxDecoration(color: Colors.greenAccent, shape: BoxShape.circle, boxShadow: [BoxShadow(color: Colors.greenAccent, blurRadius: 5)])
-                    ),
+                    // LIVE STATUS CHIP
+                    _StatusBadge(status: status),
                     const SizedBox(width: 8),
                     // INDIVIDUAL DELETE ICON
                     InkWell(
@@ -637,7 +796,7 @@ class _ApplicationCard extends StatelessWidget {
                 Text(date, style: const TextStyle(color: Colors.white38, fontSize: 13)),
                 
                 const SizedBox(height: 20),
-                Divider(color: Colors.white.withOpacity(0.05)),
+                Divider(color: Colors.white.withValues(alpha: 0.05)),
                 const SizedBox(height: 20),
 
                 // DETAILS
@@ -660,7 +819,132 @@ class _ApplicationCard extends StatelessWidget {
                 ),
 
                 const SizedBox(height: 20),
+
+                // VERIFICATION BUTTON
+                const Text("VERIFICATION", style: TextStyle(color: Colors.white30, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1.5)),
+                const SizedBox(height: 10),
+                InkWell(
+                  onTap: onVerify,
+                  borderRadius: BorderRadius.circular(12),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 250),
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 13),
+                    decoration: BoxDecoration(
+                      color: isApproved
+                          ? const Color(0xFF10B981).withValues(alpha: 0.12)
+                          : const Color(0xFF6366F1).withValues(alpha: 0.10),
+                      border: Border.all(
+                        color: isApproved
+                            ? const Color(0xFF10B981).withValues(alpha: 0.5)
+                            : const Color(0xFF6366F1).withValues(alpha: 0.4),
+                        width: 1.5,
+                      ),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          isApproved ? Icons.verified_rounded : Icons.verified_outlined,
+                          color: isApproved ? const Color(0xFF10B981) : const Color(0xFF818CF8),
+                          size: 18,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          isApproved ? 'Verified  ·  Tap to Revoke' : 'Tap to Verify User',
+                          style: TextStyle(
+                            color: isApproved ? const Color(0xFF10B981) : const Color(0xFF818CF8),
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                            letterSpacing: 0.3,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 20),
                 
+                // ── EXAM GRADING ─────────────────────────────────────────
+                if (hasExam) ...[
+                  const Text("EXAM RESULT", style: TextStyle(color: Colors.white30, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1.5)),
+                  const SizedBox(height: 10),
+                  InkWell(
+                    onTap: onGradeExam,
+                    borderRadius: BorderRadius.circular(12),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 250),
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 16),
+                      decoration: BoxDecoration(
+                        color: examPassed
+                            ? const Color(0xFF10B981).withValues(alpha: 0.10)
+                            : examFailed
+                                ? const Color(0xFFEF4444).withValues(alpha: 0.10)
+                                : const Color(0xFFF59E0B).withValues(alpha: 0.10),
+                        border: Border.all(
+                          color: examPassed
+                              ? const Color(0xFF10B981).withValues(alpha: 0.45)
+                              : examFailed
+                                  ? const Color(0xFFEF4444).withValues(alpha: 0.45)
+                                  : const Color(0xFFF59E0B).withValues(alpha: 0.45),
+                          width: 1.5,
+                        ),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            examPassed
+                                ? Icons.check_circle_rounded
+                                : examFailed
+                                    ? Icons.cancel_rounded
+                                    : Icons.pending_actions_rounded,
+                            color: examPassed
+                                ? const Color(0xFF10B981)
+                                : examFailed
+                                    ? const Color(0xFFEF4444)
+                                    : const Color(0xFFF59E0B),
+                            size: 18,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              examPassed
+                                  ? 'Exam Passed  ·  Tap to Re-grade'
+                                  : examFailed
+                                      ? 'Exam Failed  ·  Tap to Re-grade'
+                                      : 'Pending Review  ·  Tap to Grade',
+                              style: TextStyle(
+                                color: examPassed
+                                    ? const Color(0xFF10B981)
+                                    : examFailed
+                                        ? const Color(0xFFEF4444)
+                                        : const Color(0xFFF59E0B),
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                                letterSpacing: 0.3,
+                              ),
+                            ),
+                          ),
+                          Icon(
+                            Icons.edit_rounded,
+                            color: examPassed
+                                ? const Color(0xFF10B981).withValues(alpha: 0.6)
+                                : examFailed
+                                    ? const Color(0xFFEF4444).withValues(alpha: 0.6)
+                                    : const Color(0xFFF59E0B).withValues(alpha: 0.6),
+                            size: 15,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                ],
+
                 // DOCUMENTS ACTIONS
                 const Text("ATTACHMENTS", style: TextStyle(color: Colors.white30, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1.5)),
                 const SizedBox(height: 12),
@@ -695,6 +979,989 @@ class _ApplicationCard extends StatelessWidget {
   }
 }
 
+// ===========================================================================
+// VERIFY CONFIRMATION DIALOG
+// ===========================================================================
+
+class _VerifyConfirmDialog extends StatefulWidget {
+  final String fullName;
+  final String email;
+  final bool isApproving;
+
+  const _VerifyConfirmDialog({
+    required this.fullName,
+    required this.email,
+    required this.isApproving,
+  });
+
+  @override
+  State<_VerifyConfirmDialog> createState() => _VerifyConfirmDialogState();
+}
+
+class _VerifyConfirmDialogState extends State<_VerifyConfirmDialog>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _anim;
+  late Animation<double> _scale;
+  late Animation<double> _fade;
+
+  @override
+  void initState() {
+    super.initState();
+    _anim = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 340),
+    )..forward();
+    _scale = CurvedAnimation(parent: _anim, curve: Curves.easeOutBack);
+    _fade  = CurvedAnimation(parent: _anim, curve: Curves.easeIn);
+  }
+
+  @override
+  void dispose() {
+    _anim.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isApproving = widget.isApproving;
+    final accentColor =
+        isApproving ? const Color(0xFF10B981) : const Color(0xFFF59E0B);
+    final headerTop =
+        isApproving ? const Color(0xFF0D2E22) : const Color(0xFF2E1F0A);
+    final headerBot =
+        isApproving ? const Color(0xFF0A1F18) : const Color(0xFF1C1205);
+
+    return FadeTransition(
+      opacity: _fade,
+      child: ScaleTransition(
+        scale: _scale,
+        child: Center(
+          child: Material(
+            color: Colors.transparent,
+            child: Container(
+              width: 420,
+              margin: const EdgeInsets.symmetric(horizontal: 24),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0F172A),
+                borderRadius: BorderRadius.circular(28),
+                border: Border.all(
+                  color: accentColor.withValues(alpha: 0.35),
+                  width: 1.5,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: accentColor.withValues(alpha: 0.20),
+                    blurRadius: 50,
+                    spreadRadius: 2,
+                    offset: const Offset(0, 16),
+                  ),
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.5),
+                    blurRadius: 30,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(28),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // ── HEADER ──────────────────────────────────────
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 36),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [headerTop, headerBot],
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                        ),
+                      ),
+                      child: Column(children: [
+                        // Icon rings
+                        Stack(alignment: Alignment.center, children: [
+                          Container(
+                            width: 90, height: 90,
+                            decoration: BoxDecoration(
+                              color: accentColor.withValues(alpha: 0.08),
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          Container(
+                            width: 68, height: 68,
+                            decoration: BoxDecoration(
+                              color: accentColor.withValues(alpha: 0.15),
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          Container(
+                            width: 50, height: 50,
+                            decoration: BoxDecoration(
+                              color: accentColor,
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: accentColor.withValues(alpha: 0.5),
+                                  blurRadius: 18,
+                                  spreadRadius: 2,
+                                ),
+                              ],
+                            ),
+                            child: Icon(
+                              isApproving
+                                  ? Icons.verified_user_rounded
+                                  : Icons.remove_moderator_rounded,
+                              color: Colors.white,
+                              size: 26,
+                            ),
+                          ),
+                        ]),
+                        const SizedBox(height: 18),
+                        Text(
+                          isApproving
+                              ? 'Confirm Verification'
+                              : 'Revoke Verification',
+                          style: TextStyle(
+                            color: accentColor,
+                            fontSize: 22,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: -0.3,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          isApproving
+                              ? 'You are about to approve this user'
+                              : 'You are about to revoke this user\'s access',
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.45),
+                            fontSize: 13,
+                          ),
+                        ),
+                      ]),
+                    ),
+
+                    // ── BODY ────────────────────────────────────────
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(28, 28, 28, 28),
+                      child: Column(children: [
+                        // User info card
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(20),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.04),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.08),
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // Label
+                              Text(
+                                'USER TO BE ${isApproving ? 'VERIFIED' : 'REVOKED'}',
+                                style: TextStyle(
+                                  color: Colors.white.withValues(alpha: 0.3),
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: 1.4,
+                                ),
+                              ),
+                              const SizedBox(height: 14),
+                              // Avatar + name row
+                              Row(children: [
+                                Container(
+                                  width: 44, height: 44,
+                                  decoration: BoxDecoration(
+                                    color: accentColor.withValues(alpha: 0.15),
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: accentColor.withValues(alpha: 0.4),
+                                      width: 1.5,
+                                    ),
+                                  ),
+                                  child: Center(
+                                    child: Text(
+                                      widget.fullName.isNotEmpty
+                                          ? widget.fullName[0].toUpperCase()
+                                          : '?',
+                                      style: TextStyle(
+                                        color: accentColor,
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.w900,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 14),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        widget.fullName.isEmpty
+                                            ? 'Unknown User'
+                                            : widget.fullName,
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Row(children: [
+                                        Icon(
+                                          Icons.email_outlined,
+                                          size: 13,
+                                          color: Colors.white.withValues(alpha: 0.4),
+                                        ),
+                                        const SizedBox(width: 5),
+                                        Expanded(
+                                          child: Text(
+                                            widget.email,
+                                            style: TextStyle(
+                                              color: Colors.white.withValues(alpha: 0.55),
+                                              fontSize: 13,
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      ]),
+                                    ],
+                                  ),
+                                ),
+                              ]),
+                              const SizedBox(height: 16),
+                              // Status change indicator
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.symmetric(
+                                    vertical: 10, horizontal: 14),
+                                decoration: BoxDecoration(
+                                  color: accentColor.withValues(alpha: 0.08),
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(
+                                    color: accentColor.withValues(alpha: 0.25),
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    _StatusPill(
+                                      label: isApproving ? 'Pending' : 'Verified',
+                                      color: isApproving
+                                          ? const Color(0xFFF59E0B)
+                                          : const Color(0xFF10B981),
+                                    ),
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                                      child: Icon(
+                                        Icons.arrow_forward_rounded,
+                                        color: Colors.white.withValues(alpha: 0.3),
+                                        size: 16,
+                                      ),
+                                    ),
+                                    _StatusPill(
+                                      label: isApproving ? 'Verified' : 'Pending',
+                                      color: isApproving
+                                          ? const Color(0xFF10B981)
+                                          : const Color(0xFFF59E0B),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        const SizedBox(height: 18),
+
+                        // Warning note
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(
+                              vertical: 12, horizontal: 14),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.03),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.07),
+                            ),
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Icon(
+                                Icons.info_outline_rounded,
+                                size: 15,
+                                color: Colors.white.withValues(alpha: 0.3),
+                              ),
+                              const SizedBox(width: 9),
+                              Expanded(
+                                child: Text(
+                                  isApproving
+                                      ? 'This will grant the user full access to the platform. They will be notified of their approved status.'
+                                      : 'This will remove the user\'s verified status and set them back to pending review.',
+                                  style: TextStyle(
+                                    color: Colors.white.withValues(alpha: 0.4),
+                                    fontSize: 12,
+                                    height: 1.5,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        const SizedBox(height: 24),
+
+                        // ── ACTION BUTTONS ───────────────────────────
+                        Row(children: [
+                          // Cancel
+                          Expanded(
+                            child: InkWell(
+                              onTap: () => Navigator.of(context).pop(false),
+                              borderRadius: BorderRadius.circular(14),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(vertical: 15),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.05),
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(
+                                    color: Colors.white.withValues(alpha: 0.1),
+                                  ),
+                                ),
+                                child: const Center(
+                                  child: Text(
+                                    'Cancel',
+                                    style: TextStyle(
+                                      color: Colors.white54,
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          // Confirm
+                          Expanded(
+                            flex: 2,
+                            child: InkWell(
+                              onTap: () => Navigator.of(context).pop(true),
+                              borderRadius: BorderRadius.circular(14),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(vertical: 15),
+                                decoration: BoxDecoration(
+                                  color: accentColor,
+                                  borderRadius: BorderRadius.circular(14),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: accentColor.withValues(alpha: 0.4),
+                                      blurRadius: 16,
+                                      offset: const Offset(0, 4),
+                                    ),
+                                  ],
+                                ),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      isApproving
+                                          ? Icons.verified_rounded
+                                          : Icons.remove_moderator_rounded,
+                                      color: Colors.white,
+                                      size: 18,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      isApproving
+                                          ? 'Yes, Verify User'
+                                          : 'Yes, Revoke Access',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ]),
+                      ]),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ===========================================================================
+// EXAM GRADE DIALOG  — Pass / Fail
+// ===========================================================================
+
+class _ExamGradeDialog extends StatefulWidget {
+  final String fullName;
+  final String email;
+  final String currentExamStatus;
+
+  const _ExamGradeDialog({
+    required this.fullName,
+    required this.email,
+    required this.currentExamStatus,
+  });
+
+  @override
+  State<_ExamGradeDialog> createState() => _ExamGradeDialogState();
+}
+
+class _ExamGradeDialogState extends State<_ExamGradeDialog>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _anim;
+  late Animation<double> _scale;
+  late Animation<double> _fade;
+
+  String? _selected; // 'passed' or 'failed'
+
+  @override
+  void initState() {
+    super.initState();
+    _anim = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 340),
+    )..forward();
+    _scale = CurvedAnimation(parent: _anim, curve: Curves.easeOutBack);
+    _fade  = CurvedAnimation(parent: _anim, curve: Curves.easeIn);
+
+    // Pre-select current grade if already graded
+    if (widget.currentExamStatus == 'passed' || widget.currentExamStatus == 'failed') {
+      _selected = widget.currentExamStatus;
+    }
+  }
+
+  @override
+  void dispose() {
+    _anim.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bool canConfirm = _selected != null;
+
+    return FadeTransition(
+      opacity: _fade,
+      child: ScaleTransition(
+        scale: _scale,
+        child: Center(
+          child: Material(
+            color: Colors.transparent,
+            child: Container(
+              width: 440,
+              margin: const EdgeInsets.symmetric(horizontal: 24),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0F172A),
+                borderRadius: BorderRadius.circular(28),
+                border: Border.all(
+                  color: const Color(0xFF6366F1).withValues(alpha: 0.35),
+                  width: 1.5,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFF6366F1).withValues(alpha: 0.18),
+                    blurRadius: 50,
+                    spreadRadius: 2,
+                    offset: const Offset(0, 16),
+                  ),
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.5),
+                    blurRadius: 30,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(28),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+
+                    // ── HEADER ────────────────────────────────────────────
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 32),
+                      decoration: const BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [Color(0xFF1E1B4B), Color(0xFF0F0E2A)],
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                        ),
+                      ),
+                      child: Column(children: [
+                        Stack(alignment: Alignment.center, children: [
+                          Container(
+                            width: 88, height: 88,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF6366F1).withValues(alpha: 0.08),
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          Container(
+                            width: 66, height: 66,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF6366F1).withValues(alpha: 0.15),
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          Container(
+                            width: 50, height: 50,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF6366F1),
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: const Color(0xFF6366F1).withValues(alpha: 0.50),
+                                  blurRadius: 18,
+                                  spreadRadius: 2,
+                                ),
+                              ],
+                            ),
+                            child: const Icon(
+                              Icons.fact_check_rounded,
+                              color: Colors.white,
+                              size: 26,
+                            ),
+                          ),
+                        ]),
+                        const SizedBox(height: 18),
+                        const Text(
+                          'Grade Exam',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 22,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: -0.3,
+                          ),
+                        ),
+                        const SizedBox(height: 5),
+                        Text(
+                          'Select a result for this applicant\'s exam',
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.40),
+                            fontSize: 13,
+                          ),
+                        ),
+                      ]),
+                    ),
+
+                    // ── BODY ──────────────────────────────────────────────
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(28, 28, 28, 28),
+                      child: Column(
+                        children: [
+
+                          // Applicant info card
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(18),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.04),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+                            ),
+                            child: Row(children: [
+                              Container(
+                                width: 44, height: 44,
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF6366F1).withValues(alpha: 0.15),
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: const Color(0xFF6366F1).withValues(alpha: 0.4),
+                                    width: 1.5,
+                                  ),
+                                ),
+                                child: Center(
+                                  child: Text(
+                                    widget.fullName.isNotEmpty ? widget.fullName[0].toUpperCase() : '?',
+                                    style: const TextStyle(
+                                      color: Color(0xFF818CF8),
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.w900,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 14),
+                              Expanded(
+                                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                  Text(
+                                    widget.fullName.isEmpty ? 'Unknown User' : widget.fullName,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  const SizedBox(height: 3),
+                                  Row(children: [
+                                    Icon(Icons.email_outlined, size: 12, color: Colors.white.withValues(alpha: 0.35)),
+                                    const SizedBox(width: 5),
+                                    Expanded(
+                                      child: Text(
+                                        widget.email,
+                                        style: TextStyle(color: Colors.white.withValues(alpha: 0.50), fontSize: 12),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ]),
+                                ]),
+                              ),
+                            ]),
+                          ),
+
+                          const SizedBox(height: 20),
+
+                          // ── PASS / FAIL CHOICE ────────────────────────
+                          const Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              'SELECT RESULT',
+                              style: TextStyle(
+                                color: Colors.white30,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 1.4,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+
+                          Row(children: [
+                            // PASS button
+                            Expanded(
+                              child: GestureDetector(
+                                onTap: () => setState(() => _selected = 'passed'),
+                                child: AnimatedContainer(
+                                  duration: const Duration(milliseconds: 200),
+                                  padding: const EdgeInsets.symmetric(vertical: 18),
+                                  decoration: BoxDecoration(
+                                    color: _selected == 'passed'
+                                        ? const Color(0xFF10B981).withValues(alpha: 0.18)
+                                        : Colors.white.withValues(alpha: 0.03),
+                                    borderRadius: BorderRadius.circular(16),
+                                    border: Border.all(
+                                      color: _selected == 'passed'
+                                          ? const Color(0xFF10B981)
+                                          : Colors.white.withValues(alpha: 0.10),
+                                      width: _selected == 'passed' ? 2.0 : 1.0,
+                                    ),
+                                    boxShadow: _selected == 'passed'
+                                        ? [BoxShadow(color: const Color(0xFF10B981).withValues(alpha: 0.25), blurRadius: 16, offset: const Offset(0, 4))]
+                                        : [],
+                                  ),
+                                  child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                                    Container(
+                                      width: 46, height: 46,
+                                      decoration: BoxDecoration(
+                                        color: _selected == 'passed'
+                                            ? const Color(0xFF10B981).withValues(alpha: 0.20)
+                                            : Colors.white.withValues(alpha: 0.05),
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: Icon(
+                                        Icons.check_circle_rounded,
+                                        color: _selected == 'passed'
+                                            ? const Color(0xFF10B981)
+                                            : Colors.white24,
+                                        size: 26,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 10),
+                                    Text(
+                                      'PASSED',
+                                      style: TextStyle(
+                                        color: _selected == 'passed'
+                                            ? const Color(0xFF10B981)
+                                            : Colors.white38,
+                                        fontWeight: FontWeight.w900,
+                                        fontSize: 13,
+                                        letterSpacing: 1.0,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      'Applicant qualifies',
+                                      style: TextStyle(
+                                        color: _selected == 'passed'
+                                            ? const Color(0xFF10B981).withValues(alpha: 0.70)
+                                            : Colors.white24,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ]),
+                                ),
+                              ),
+                            ),
+
+                            const SizedBox(width: 14),
+
+                            // FAIL button
+                            Expanded(
+                              child: GestureDetector(
+                                onTap: () => setState(() => _selected = 'failed'),
+                                child: AnimatedContainer(
+                                  duration: const Duration(milliseconds: 200),
+                                  padding: const EdgeInsets.symmetric(vertical: 18),
+                                  decoration: BoxDecoration(
+                                    color: _selected == 'failed'
+                                        ? const Color(0xFFEF4444).withValues(alpha: 0.18)
+                                        : Colors.white.withValues(alpha: 0.03),
+                                    borderRadius: BorderRadius.circular(16),
+                                    border: Border.all(
+                                      color: _selected == 'failed'
+                                          ? const Color(0xFFEF4444)
+                                          : Colors.white.withValues(alpha: 0.10),
+                                      width: _selected == 'failed' ? 2.0 : 1.0,
+                                    ),
+                                    boxShadow: _selected == 'failed'
+                                        ? [BoxShadow(color: const Color(0xFFEF4444).withValues(alpha: 0.25), blurRadius: 16, offset: const Offset(0, 4))]
+                                        : [],
+                                  ),
+                                  child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                                    Container(
+                                      width: 46, height: 46,
+                                      decoration: BoxDecoration(
+                                        color: _selected == 'failed'
+                                            ? const Color(0xFFEF4444).withValues(alpha: 0.20)
+                                            : Colors.white.withValues(alpha: 0.05),
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: Icon(
+                                        Icons.cancel_rounded,
+                                        color: _selected == 'failed'
+                                            ? const Color(0xFFEF4444)
+                                            : Colors.white24,
+                                        size: 26,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 10),
+                                    Text(
+                                      'FAILED',
+                                      style: TextStyle(
+                                        color: _selected == 'failed'
+                                            ? const Color(0xFFEF4444)
+                                            : Colors.white38,
+                                        fontWeight: FontWeight.w900,
+                                        fontSize: 13,
+                                        letterSpacing: 1.0,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      'Does not qualify',
+                                      style: TextStyle(
+                                        color: _selected == 'failed'
+                                            ? const Color(0xFFEF4444).withValues(alpha: 0.70)
+                                            : Colors.white24,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ]),
+                                ),
+                              ),
+                            ),
+                          ]),
+
+                          const SizedBox(height: 20),
+
+                          // Info note
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.03),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: Colors.white.withValues(alpha: 0.07)),
+                            ),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Icon(Icons.info_outline_rounded, size: 15, color: Colors.white.withValues(alpha: 0.30)),
+                                const SizedBox(width: 9),
+                                Expanded(
+                                  child: Text(
+                                    'This result will be stored under onboardingExam.status in Firestore. '
+                                    'The applicant\'s app will reflect this result immediately.',
+                                    style: TextStyle(
+                                      color: Colors.white.withValues(alpha: 0.38),
+                                      fontSize: 12,
+                                      height: 1.5,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+
+                          const SizedBox(height: 24),
+
+                          // ── ACTION BUTTONS ───────────────────────────
+                          Row(children: [
+                            // Cancel
+                            Expanded(
+                              child: InkWell(
+                                onTap: () => Navigator.of(context).pop(null),
+                                borderRadius: BorderRadius.circular(14),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(vertical: 15),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withValues(alpha: 0.05),
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+                                  ),
+                                  child: const Center(
+                                    child: Text(
+                                      'Cancel',
+                                      style: TextStyle(
+                                        color: Colors.white54,
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            // Confirm
+                            Expanded(
+                              flex: 2,
+                              child: InkWell(
+                                onTap: canConfirm ? () => Navigator.of(context).pop(_selected) : null,
+                                borderRadius: BorderRadius.circular(14),
+                                child: AnimatedContainer(
+                                  duration: const Duration(milliseconds: 200),
+                                  padding: const EdgeInsets.symmetric(vertical: 15),
+                                  decoration: BoxDecoration(
+                                    color: canConfirm
+                                        ? (_selected == 'passed'
+                                            ? const Color(0xFF10B981)
+                                            : const Color(0xFFEF4444))
+                                        : Colors.white.withValues(alpha: 0.06),
+                                    borderRadius: BorderRadius.circular(14),
+                                    boxShadow: canConfirm
+                                        ? [
+                                            BoxShadow(
+                                              color: (_selected == 'passed'
+                                                  ? const Color(0xFF10B981)
+                                                  : const Color(0xFFEF4444))
+                                                  .withValues(alpha: 0.40),
+                                              blurRadius: 16,
+                                              offset: const Offset(0, 4),
+                                            ),
+                                          ]
+                                        : [],
+                                  ),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(
+                                        _selected == 'passed'
+                                            ? Icons.check_circle_rounded
+                                            : _selected == 'failed'
+                                                ? Icons.cancel_rounded
+                                                : Icons.fact_check_rounded,
+                                        color: canConfirm ? Colors.white : Colors.white24,
+                                        size: 18,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        canConfirm
+                                            ? (_selected == 'passed' ? 'Confirm Pass' : 'Confirm Fail')
+                                            : 'Select a Result',
+                                        style: TextStyle(
+                                          color: canConfirm ? Colors.white : Colors.white24,
+                                          fontWeight: FontWeight.w800,
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ]),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// Small pill used inside the status-change indicator
+class _StatusPill extends StatelessWidget {
+  final String label;
+  final Color color;
+  const _StatusPill({required this.label, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withValues(alpha: 0.4)),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Container(
+          width: 6, height: 6,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 5),
+        Text(
+          label,
+          style: TextStyle(
+            color: color,
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ]),
+    );
+  }
+}
+
+// ===========================================================================
+// INFO ROW
+// ===========================================================================
+
 class _InfoRow extends StatelessWidget {
   final IconData icon;
   final String text;
@@ -708,6 +1975,39 @@ class _InfoRow extends StatelessWidget {
         const SizedBox(width: 10),
         Expanded(child: Text(text, style: const TextStyle(color: Colors.white70, fontSize: 14), maxLines: 1, overflow: TextOverflow.ellipsis)),
       ],
+    );
+  }
+}
+
+// ===========================================================================
+// STATUS BADGE  (shown in card header)
+// ===========================================================================
+
+class _StatusBadge extends StatelessWidget {
+  final String status;
+  const _StatusBadge({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    final (Color color, String label) = switch (status) {
+      'approved'  => (const Color(0xFF10B981), 'Verified'),
+      'reviewing' => (const Color(0xFF3B82F6), 'Reviewing'),
+      'rejected'  => (const Color(0xFFEF4444), 'Rejected'),
+      _           => (const Color(0xFFF59E0B), 'Pending'),
+    };
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withValues(alpha: 0.4)),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Container(width: 6, height: 6, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+        const SizedBox(width: 5),
+        Text(label, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w700)),
+      ]),
     );
   }
 }
@@ -728,8 +2028,8 @@ class _DocButton extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 14),
         decoration: BoxDecoration(
-          color: color.withOpacity(0.08),
-          border: Border.all(color: color.withOpacity(0.2)),
+          color: color.withValues(alpha: 0.08),
+          border: Border.all(color: color.withValues(alpha: 0.2)),
           borderRadius: BorderRadius.circular(12),
         ),
         child: Column(
@@ -760,7 +2060,7 @@ class _BgPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final bgPaint = Paint()..color = const Color(0xFF020408);
     canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), bgPaint);
-    final gridPaint = Paint()..color = Colors.white.withOpacity(0.02)..strokeWidth = 1;
+    final gridPaint = Paint()..color = Colors.white.withValues(alpha: 0.02)..strokeWidth = 1;
     for (double i = 0; i < size.width; i += 60) canvas.drawLine(Offset(i, 0), Offset(i, size.height), gridPaint);
     for (double i = 0; i < size.height; i += 60) canvas.drawLine(Offset(0, i), Offset(size.width, i), gridPaint);
   }
