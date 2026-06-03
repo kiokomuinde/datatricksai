@@ -1,5 +1,10 @@
 import 'package:flutter/material.dart';
-import 'user_dashboard.dart';
+
+// Import the newly split files directly so this page can see the classes and colors
+import 'dashboard_user/opportunity_model.dart';
+import 'dashboard_user/theme_constants.dart';
+import 'dashboard_user/glass_container.dart';
+import 'dashboard_user/app_dialogs.dart';
 
 // ===========================================================================
 // JOBS PAGE
@@ -116,7 +121,7 @@ class _StatusBanner extends StatelessWidget {
     if (examPassed && isVerified) {
       return _BannerShell(
         gradientColors: const [Color(0xFF059669), Color(0xFF10B981)],
-        shadowColor: Color(0xFF10B981),
+        shadowColor: const Color(0xFF10B981),
         icon: Icons.verified_rounded,
         child: Row(
           children: [
@@ -189,7 +194,7 @@ class _StatusBanner extends StatelessWidget {
     if (examPassed && !isVerified) {
       return _BannerShell(
         gradientColors: const [Color(0xFFF59E0B), Color(0xFFD97706)],
-        shadowColor: Color(0xFFF59E0B),
+        shadowColor: const Color(0xFFF59E0B),
         icon: Icons.hourglass_top_rounded,
         child: Row(
           children: [
@@ -261,7 +266,7 @@ class _StatusBanner extends StatelessWidget {
     if (!paymentComplete) {
       return _BannerShell(
         gradientColors: const [Color(0xFF92400E), Color(0xFFB45309), Color(0xFFF59E0B)],
-        shadowColor: Color(0xFFF59E0B),
+        shadowColor: const Color(0xFFF59E0B),
         icon: Icons.payment_rounded,
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.center,
@@ -367,7 +372,7 @@ class _StatusBanner extends StatelessWidget {
           Color(0xFF7C3AED),
           Color(0xFF06B6D4)
         ],
-        shadowColor: Color(0xFF6366F1),
+        shadowColor: const Color(0xFF6366F1),
         icon: Icons.quiz_rounded,
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.center,

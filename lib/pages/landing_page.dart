@@ -1133,14 +1133,45 @@ class _FixedSmartNavbar extends StatelessWidget {
                     const SizedBox(width: 20),
                   ],
                   const SizedBox(width: 20),
-                  
-                  // UPDATED: BUTTON CHANGED TO 'GET STARTED' & LINKED
-                  ElevatedButton(
+
+                  // Sign In Button → Auth Page
+                  TextButton(
                     onPressed: () {
                       Navigator.pushNamed(context, '/auth');
                     },
-                    style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black),
-                    child: const Text("Get started"),
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    ),
+                    child: const Text(
+                      "Sign In",
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 15,
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(width: 10),
+
+                  // Sign Up Button → Careers Page
+                  ElevatedButton(
+                    onPressed: () {
+                      Navigator.pushNamed(context, '/careers');
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF6366F1),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      elevation: 4,
+                      shadowColor: const Color(0xFF6366F1).withOpacity(0.5),
+                    ),
+                    child: const Text(
+                      "Sign Up",
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                    ),
                   ),
                 ],
               ),

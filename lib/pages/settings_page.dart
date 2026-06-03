@@ -2,7 +2,11 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
-import 'user_dashboard.dart';
+// Import the split files directly so this page can see the helper functions, styling, and widgets
+import 'dashboard_user/opportunity_model.dart';
+import 'dashboard_user/theme_constants.dart';
+import 'dashboard_user/glass_container.dart';
+import 'dashboard_user/app_dialogs.dart';
 
 // ===========================================================================
 // DATATRICKS AI — SETTINGS PAGE

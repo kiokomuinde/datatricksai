@@ -1,5 +1,11 @@
 import 'package:flutter/material.dart';
-import 'user_dashboard.dart';
+
+// Import the newly split files directly so this page can see the classes and colors
+import 'dashboard_user/opportunity_model.dart';
+import 'dashboard_user/theme_constants.dart';
+import 'dashboard_user/glass_container.dart';
+import 'dashboard_user/app_dialogs.dart';
+
 import 'dashboard_page.dart' show OppGrid;
 
 // ===========================================================================

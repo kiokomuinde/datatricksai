@@ -11,54 +11,6 @@ import 'package:http/http.dart' as http;
 // ===========================================================================
 // DATATRICKS AI — PAYMENT INFORMATION PAGE
 // ===========================================================================
-//
-// FIRESTORE DATA MODEL (collection: 'applications', doc: uid)
-// ─────────────────────────────────────────────────────────────
-// Existing fields written by CareersPage / OnboardingExamPage:
-//   uid, firstName, lastName, email, phone, birthDate
-//   location: { state, city, zip }
-//   highSchool, role, linkedin, source
-//   resumeUrl, resumeName, suppDocUrl, suppDocName
-//   appliedAt, status
-//   onboardingExam: { status, mcqAnswers, writtenAnswer1, writtenAnswer2,
-//                     totalQuestions, mcqCount, writtenCount, submittedAt,
-//                     gradedAt, gradedBy }
-//   verifiedAt, verifiedBy
-//
-// Fields added by THIS page (nested under 'paymentInfo'):
-//   paymentInfo: {
-//     // Identity Documents
-//     ssnLast4          : String   (last 4 digits stored — full SSN not stored)
-//     ssnEncrypted      : String   (base64 encoded for secure display; admin-only)
-//     dlFrontUrl        : String   (Cloudinary URL)
-//     dlBackUrl         : String   (Cloudinary URL)
-//     dlState           : String
-//     dlExpiry          : String   (MM/YYYY)
-//     idFrontUrl        : String   (Cloudinary URL)
-//     idBackUrl         : String   (Cloudinary URL)
-//     idType            : String   (State ID | Passport | Military ID)
-//     idExpiry          : String   (MM/YYYY)
-//
-//     // Banking Details
-//     bankName          : String
-//     accountHolderName : String
-//     accountType       : String   (Checking | Savings)
-//     routingNumber     : String
-//     accountNumber     : String   (stored; treat as sensitive)
-//     accountNumberLast4: String
-//
-//     // Address (billing)
-//     billingAddress    : String
-//     billingCity       : String
-//     billingState      : String
-//     billingZip        : String
-//
-//     // Meta
-//     submittedAt       : Timestamp
-//     lastUpdatedAt     : Timestamp
-//     isComplete        : bool
-//   }
-// ===========================================================================
 
 // ── Cloudinary config (same project as CareersPage) ─────────────────────────
 const String _cloudName    = 'dgdnli7vh';
@@ -95,7 +47,15 @@ class _PaymentInfoPageState extends State<PaymentInfoPage>
   bool _loading      = true;
   bool _saving       = false;
   bool _isComplete   = false;
+  bool _isVerified   = false; // NEW: Tracks Admin Verification Status
   String _saveStatus = '';
+
+  // ── Auto-validate: true once user has submitted once OR data already existed
+  bool _autoValidate = false;
+
+  // ── Track whether uploads are missing (shown as inline errors after load)
+  bool _dlFrontMissing = false;
+  bool _dlBackMissing  = false;
 
   // ── Section expansion ───────────────────────────────────────────────────────
   late AnimationController _expandCtrl;
@@ -114,23 +74,12 @@ class _PaymentInfoPageState extends State<PaymentInfoPage>
   bool _dlFrontLoading = false;
   bool _dlBackLoading  = false;
 
-  // ID
-  String? _selectedIdType;
-  final _idExpiryCtrl = TextEditingController();
-  String? _idFrontUrl;
-  String? _idBackUrl;
-  bool _idFrontLoading = false;
-  bool _idBackLoading  = false;
-  final List<String> _idTypes = ['State ID', 'Passport', 'Military ID'];
-
   // Banking
   final _bankNameCtrl          = TextEditingController();
   final _accountHolderCtrl     = TextEditingController();
   final _routingCtrl           = TextEditingController();
   final _accountCtrl           = TextEditingController();
   bool  _accountHidden         = true;
-  String? _selectedAccountType;
-  final List<String> _accountTypes = ['Checking', 'Savings'];
 
   // Billing address
   final _billingAddressCtrl = TextEditingController();
@@ -159,7 +108,6 @@ class _PaymentInfoPageState extends State<PaymentInfoPage>
     _expandCtrl.dispose();
     _ssnCtrl.dispose();
     _dlStateCtrl.dispose(); _dlExpiryCtrl.dispose();
-    _idExpiryCtrl.dispose();
     _bankNameCtrl.dispose(); _accountHolderCtrl.dispose();
     _routingCtrl.dispose(); _accountCtrl.dispose();
     _billingAddressCtrl.dispose(); _billingCityCtrl.dispose();
@@ -182,15 +130,24 @@ class _PaymentInfoPageState extends State<PaymentInfoPage>
       }
 
       final data    = doc.data() ?? {};
+      // Extract Admin Status
+      _isVerified   = data['status'] == 'approved';
+
       final payment = (data['paymentInfo'] as Map<String, dynamic>?) ?? {};
 
       if (payment.isNotEmpty) {
-        // SSN — show last4 masked
-        if (payment['ssnEncrypted'] != null) {
-          try {
-            final decoded = utf8.decode(base64.decode(payment['ssnEncrypted']));
-            _ssnCtrl.text = decoded;
-          } catch (_) {}
+        // SSN — restore full formatted SSN
+        if (payment['ssnFormatted'] != null) {
+          _ssnCtrl.text = payment['ssnFormatted'];
+        } else if (payment['ssn'] != null) {
+          // fallback: reformat raw digits
+          final digits = payment['ssn'].toString().replaceAll(RegExp(r'\D'), '');
+          final buf = StringBuffer();
+          for (int i = 0; i < digits.length && i < 9; i++) {
+            if (i == 3 || i == 5) buf.write('-');
+            buf.write(digits[i]);
+          }
+          _ssnCtrl.text = buf.toString();
         }
 
         // DL
@@ -199,17 +156,10 @@ class _PaymentInfoPageState extends State<PaymentInfoPage>
         _dlFrontUrl        = payment['dlFrontUrl'];
         _dlBackUrl         = payment['dlBackUrl'];
 
-        // ID
-        _selectedIdType    = payment['idType'];
-        _idExpiryCtrl.text = payment['idExpiry'] ?? '';
-        _idFrontUrl        = payment['idFrontUrl'];
-        _idBackUrl         = payment['idBackUrl'];
-
         // Banking
         _bankNameCtrl.text      = payment['bankName']          ?? '';
         _accountHolderCtrl.text = payment['accountHolderName'] ?? '';
         _routingCtrl.text       = payment['routingNumber']     ?? '';
-        _selectedAccountType    = payment['accountType'];
         if (payment['accountNumber'] != null) {
           _accountCtrl.text = payment['accountNumber'];
         }
@@ -221,6 +171,13 @@ class _PaymentInfoPageState extends State<PaymentInfoPage>
         _billingZipCtrl.text     = payment['billingZip']     ?? '';
 
         _isComplete = payment['isComplete'] == true;
+
+        // If a record already exists, immediately show errors for any missing fields
+        if (_isComplete) {
+          _autoValidate    = true;
+          _dlFrontMissing  = (_dlFrontUrl == null || _dlFrontUrl!.isEmpty);
+          _dlBackMissing   = (_dlBackUrl  == null || _dlBackUrl!.isEmpty);
+        }
       }
     } catch (e) {
       debugPrint('Load error: $e');
@@ -267,18 +224,26 @@ class _PaymentInfoPageState extends State<PaymentInfoPage>
 
   // ── Save to Firestore ─────────────────────────────────────────────────────
   Future<void> _savePaymentInfo() async {
+    if (!_isVerified) {
+      _showSnack('You must be verified by an admin to update payments.', isError: true);
+      return;
+    }
+
+    // Turn on inline validation from this point forward
+    setState(() => _autoValidate = true);
+
     if (!(_formKey.currentState?.validate() ?? false)) {
       _showSnack('Please fill in all required fields.', isError: true);
       return;
     }
 
-    // Validate document uploads
-    if (_dlFrontUrl == null || _dlBackUrl == null) {
+    // Validate document uploads — mark missing so tiles show error state
+    setState(() {
+      _dlFrontMissing = (_dlFrontUrl == null || _dlFrontUrl!.isEmpty);
+      _dlBackMissing  = (_dlBackUrl  == null || _dlBackUrl!.isEmpty);
+    });
+    if (_dlFrontMissing || _dlBackMissing) {
       _showSnack('Please upload both sides of your Driver\'s License.', isError: true);
-      return;
-    }
-    if (_idFrontUrl == null || _idBackUrl == null) {
-      _showSnack('Please upload both sides of your ID document.', isError: true);
       return;
     }
 
@@ -293,20 +258,16 @@ class _PaymentInfoPageState extends State<PaymentInfoPage>
           .update({
         'paymentInfo': {
           // Identity
+          'ssn'               : ssn,
           'ssnLast4'          : ssn.length >= 4 ? ssn.substring(ssn.length - 4) : ssn,
-          'ssnEncrypted'      : base64.encode(utf8.encode(ssn)),
+          'ssnFormatted'      : _ssnCtrl.text.trim(), // e.g. "123-45-6789"
           'dlFrontUrl'        : _dlFrontUrl,
           'dlBackUrl'         : _dlBackUrl,
           'dlState'           : _dlStateCtrl.text.trim(),
           'dlExpiry'          : _dlExpiryCtrl.text.trim(),
-          'idFrontUrl'        : _idFrontUrl,
-          'idBackUrl'         : _idBackUrl,
-          'idType'            : _selectedIdType,
-          'idExpiry'          : _idExpiryCtrl.text.trim(),
           // Banking
           'bankName'          : _bankNameCtrl.text.trim(),
           'accountHolderName' : _accountHolderCtrl.text.trim(),
-          'accountType'       : _selectedAccountType,
           'routingNumber'     : _routingCtrl.text.trim(),
           'accountNumber'     : _accountCtrl.text.trim(),
           'accountNumberLast4': _accountCtrl.text.trim().length >= 4
@@ -326,7 +287,11 @@ class _PaymentInfoPageState extends State<PaymentInfoPage>
         },
       });
 
-      setState(() { _isComplete = true; });
+      setState(() {
+        _isComplete      = true;
+        _dlFrontMissing  = false;
+        _dlBackMissing   = false;
+      });
       _showSnack('Payment information saved successfully!');
     } catch (e) {
       _showSnack('Error saving: $e', isError: true);
@@ -389,6 +354,9 @@ class _PaymentInfoPageState extends State<PaymentInfoPage>
                               padding: const EdgeInsets.symmetric(horizontal: 24),
                               child: Form(
                                 key: _formKey,
+                                autovalidateMode: _autoValidate
+                                    ? AutovalidateMode.always
+                                    : AutovalidateMode.disabled,
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
@@ -417,20 +385,9 @@ class _PaymentInfoPageState extends State<PaymentInfoPage>
                                     ),
                                     const SizedBox(height: 20),
 
-                                    // ── Section 3: Government ID ─────────────
+                                    // ── Section 3: Banking ───────────────────
                                     _buildSection(
                                       index: 2,
-                                      icon: Icons.badge_rounded,
-                                      title: 'Government-Issued ID',
-                                      subtitle: 'State ID, Passport, or Military ID',
-                                      accentColor: const Color(0xFF8B5CF6),
-                                      child: _buildIdSection(),
-                                    ),
-                                    const SizedBox(height: 20),
-
-                                    // ── Section 4: Banking ───────────────────
-                                    _buildSection(
-                                      index: 3,
                                       icon: Icons.account_balance_rounded,
                                       title: 'Banking Details',
                                       subtitle: 'For direct deposit of your earnings',
@@ -439,9 +396,9 @@ class _PaymentInfoPageState extends State<PaymentInfoPage>
                                     ),
                                     const SizedBox(height: 20),
 
-                                    // ── Section 5: Billing Address ───────────
+                                    // ── Section 4: Billing Address ───────────
                                     _buildSection(
-                                      index: 4,
+                                      index: 3,
                                       icon: Icons.home_rounded,
                                       title: 'Billing Address',
                                       subtitle: 'Must match your bank records',
@@ -598,11 +555,50 @@ class _PaymentInfoPageState extends State<PaymentInfoPage>
     );
   }
 
+  // ── Check if any saved section has missing fields ──────────────────────────
+  bool _hasMissingFields() {
+    return !_isSectionComplete(0) ||
+           !_isSectionComplete(1) ||
+           !_isSectionComplete(2) ||
+           !_isSectionComplete(3) ||
+           _dlFrontMissing ||
+           _dlBackMissing;
+  }
+
   // ── Page Header ────────────────────────────────────────────────────────────
   Widget _buildPageHeader() {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const SizedBox(height: 10),
-      if (!_isComplete)
+      
+      // Verification Lock Banner
+      if (!_isVerified)
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: _red.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: _red.withValues(alpha: 0.35)),
+          ),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Icon(Icons.lock_outline_rounded, color: _red, size: 22),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: const [
+                Text('Admin Verification Required',
+                    style: TextStyle(color: _red,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 14)),
+                SizedBox(height: 4),
+                Text(
+                  'Your account must be verified by an administrator before you can add or update your payment information. All fields are currently locked.',
+                  style: TextStyle(color: Color(0xFFFCA5A5), fontSize: 12, height: 1.5),
+                ),
+              ]),
+            ),
+          ]),
+        )
+      else if (!_isComplete)
         Container(
           width: double.infinity,
           padding: const EdgeInsets.all(18),
@@ -631,25 +627,50 @@ class _PaymentInfoPageState extends State<PaymentInfoPage>
           ]),
         )
       else
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            color: _green.withValues(alpha: 0.08),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: _green.withValues(alpha: 0.35)),
-          ),
-          child: Row(children: [
-            const Icon(Icons.verified_rounded, color: _green, size: 22),
-            const SizedBox(width: 14),
-            const Expanded(
-              child: Text(
-                'Payment information is on file. You can update your details below at any time.',
-                style: TextStyle(color: _green, fontWeight: FontWeight.w600, fontSize: 13),
-              ),
+        Column(children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: _green.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: _green.withValues(alpha: 0.35)),
             ),
-          ]),
-        ),
+            child: Row(children: [
+              const Icon(Icons.verified_rounded, color: _green, size: 22),
+              const SizedBox(width: 14),
+              const Expanded(
+                child: Text(
+                  'Payment information is on file. You can update your details below at any time.',
+                  style: TextStyle(color: _green, fontWeight: FontWeight.w600, fontSize: 13),
+                ),
+              ),
+            ]),
+          ),
+          // Show a warning if any section is missing data after a previous save
+          if (_autoValidate && _hasMissingFields()) ...[
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: _red.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: _red.withValues(alpha: 0.35)),
+              ),
+              child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Icon(Icons.error_outline_rounded, color: _red, size: 20),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Text(
+                    'Some fields are missing or incomplete. Please review each section below and fill in any highlighted fields to ensure your payments can be processed.',
+                    style: TextStyle(color: _red, fontSize: 12, height: 1.5),
+                  ),
+                ),
+              ]),
+            ),
+          ],
+        ]),
 
       const SizedBox(height: 28),
       const Text('Payment Information',
@@ -700,7 +721,11 @@ class _PaymentInfoPageState extends State<PaymentInfoPage>
                 color: Colors.white38,
               ),
               const SizedBox(width: 4),
-              _SectionCompleteBadge(index: index, isComplete: _isSectionComplete(index)),
+              _SectionCompleteBadge(
+                index: index,
+                isComplete: _isSectionComplete(index),
+                showError: _autoValidate && !_isSectionComplete(index),
+              ),
             ]),
           ),
         ),
@@ -728,9 +753,8 @@ class _PaymentInfoPageState extends State<PaymentInfoPage>
     switch (index) {
       case 0: return _ssnCtrl.text.replaceAll(RegExp(r'\D'), '').length == 9;
       case 1: return _dlFrontUrl != null && _dlBackUrl != null && _dlStateCtrl.text.isNotEmpty && _dlExpiryCtrl.text.isNotEmpty;
-      case 2: return _idFrontUrl != null && _idBackUrl != null && _selectedIdType != null && _idExpiryCtrl.text.isNotEmpty;
-      case 3: return _bankNameCtrl.text.isNotEmpty && _routingCtrl.text.length == 9 && _accountCtrl.text.length >= 4 && _selectedAccountType != null && _accountHolderCtrl.text.isNotEmpty;
-      case 4: return _billingAddressCtrl.text.isNotEmpty && _billingCityCtrl.text.isNotEmpty && _billingStateCtrl.text.isNotEmpty && _billingZipCtrl.text.length == 5;
+      case 2: return _bankNameCtrl.text.isNotEmpty && _routingCtrl.text.length == 9 && _accountCtrl.text.length >= 4 && _accountHolderCtrl.text.isNotEmpty;
+      case 3: return _billingAddressCtrl.text.isNotEmpty && _billingCityCtrl.text.isNotEmpty && _billingStateCtrl.text.isNotEmpty && _billingZipCtrl.text.length == 5;
       default: return false;
     }
   }
@@ -740,6 +764,7 @@ class _PaymentInfoPageState extends State<PaymentInfoPage>
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       _DarkTextField(
         controller: _ssnCtrl,
+        enabled: _isVerified,
         label: 'Social Security Number *',
         hint: '000-00-0000',
         obscureText: _ssnHidden,
@@ -764,8 +789,8 @@ class _PaymentInfoPageState extends State<PaymentInfoPage>
       const SizedBox(height: 12),
       _InfoNote(
         icon: Icons.lock_outline_rounded,
-        text: 'Your SSN is encrypted and used only for tax form generation (W-9/1099). '
-              'We store only the last 4 digits for display purposes.',
+        text: 'Your SSN is stored securely and used only for tax form generation (W-9/1099). '
+              'Access is restricted to authorized payroll personnel only.',
         color: _indigo,
       ),
     ]);
@@ -777,6 +802,7 @@ class _PaymentInfoPageState extends State<PaymentInfoPage>
       Row(children: [
         Expanded(child: _DarkTextField(
           controller: _dlStateCtrl,
+          enabled: _isVerified,
           label: 'Issuing State *',
           hint: 'e.g. California',
           validator: (v) => (v ?? '').isEmpty ? 'Required' : null,
@@ -785,6 +811,7 @@ class _PaymentInfoPageState extends State<PaymentInfoPage>
         const SizedBox(width: 16),
         Expanded(child: _DarkTextField(
           controller: _dlExpiryCtrl,
+          enabled: _isVerified,
           label: 'Expiry Date *',
           hint: 'MM/YYYY',
           keyboardType: TextInputType.number,
@@ -798,88 +825,55 @@ class _PaymentInfoPageState extends State<PaymentInfoPage>
       const Text('DOCUMENT UPLOADS', style: TextStyle(color: Colors.white30, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1.5)),
       const SizedBox(height: 12),
       Row(children: [
-        Expanded(child: _DocUploadTile(
-          label: "DL Front Side *",
-          icon: Icons.credit_card_rounded,
-          url: _dlFrontUrl,
-          isLoading: _dlFrontLoading,
-          color: const Color(0xFF0EA5E9),
-          onTap: () async {
-            setState(() => _dlFrontLoading = true);
-            final url = await _pickAndUpload("Driver's License Front");
-            if (mounted) setState(() { _dlFrontUrl = url ?? _dlFrontUrl; _dlFrontLoading = false; });
-          },
-        )),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          _DocUploadTile(
+            label: "DL Front Side *",
+            icon: Icons.credit_card_rounded,
+            enabled: _isVerified,
+            url: _dlFrontUrl,
+            isLoading: _dlFrontLoading,
+            color: _dlFrontMissing ? _red : const Color(0xFF0EA5E9),
+            isMissing: _dlFrontMissing,
+            onTap: () async {
+              setState(() => _dlFrontLoading = true);
+              final url = await _pickAndUpload("Driver's License Front");
+              if (mounted) setState(() {
+                _dlFrontUrl     = url ?? _dlFrontUrl;
+                _dlFrontLoading = false;
+                _dlFrontMissing = (_dlFrontUrl == null || _dlFrontUrl!.isEmpty);
+              });
+            },
+          ),
+          if (_dlFrontMissing) ...[
+            const SizedBox(height: 6),
+            const Text('DL front side is required', style: TextStyle(color: _red, fontSize: 11)),
+          ],
+        ])),
         const SizedBox(width: 14),
-        Expanded(child: _DocUploadTile(
-          label: "DL Back Side *",
-          icon: Icons.credit_card_outlined,
-          url: _dlBackUrl,
-          isLoading: _dlBackLoading,
-          color: const Color(0xFF0EA5E9),
-          onTap: () async {
-            setState(() => _dlBackLoading = true);
-            final url = await _pickAndUpload("Driver's License Back");
-            if (mounted) setState(() { _dlBackUrl = url ?? _dlBackUrl; _dlBackLoading = false; });
-          },
-        )),
-      ]),
-    ]);
-  }
-
-  // ── Government ID Section ─────────────────────────────────────────────────
-  Widget _buildIdSection() {
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Row(children: [
-        Expanded(child: _DarkDropdown<String>(
-          label: 'ID Type *',
-          value: _selectedIdType,
-          items: _idTypes,
-          itemLabel: (s) => s,
-          onChanged: (v) => setState(() => _selectedIdType = v),
-          validator: (v) => v == null ? 'Select ID type' : null,
-        )),
-        const SizedBox(width: 16),
-        Expanded(child: _DarkTextField(
-          controller: _idExpiryCtrl,
-          label: 'Expiry Date *',
-          hint: 'MM/YYYY',
-          keyboardType: TextInputType.number,
-          inputFormatters: [_ExpiryInputFormatter()],
-          maxLength: 7,
-          validator: (v) => (v ?? '').length < 7 ? 'Enter valid MM/YYYY' : null,
-          onChanged: (_) => setState(() {}),
-        )),
-      ]),
-      const SizedBox(height: 20),
-      const Text('DOCUMENT UPLOADS', style: TextStyle(color: Colors.white30, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1.5)),
-      const SizedBox(height: 12),
-      Row(children: [
-        Expanded(child: _DocUploadTile(
-          label: "ID Front Side *",
-          icon: Icons.badge_rounded,
-          url: _idFrontUrl,
-          isLoading: _idFrontLoading,
-          color: const Color(0xFF8B5CF6),
-          onTap: () async {
-            setState(() => _idFrontLoading = true);
-            final url = await _pickAndUpload('ID Front');
-            if (mounted) setState(() { _idFrontUrl = url ?? _idFrontUrl; _idFrontLoading = false; });
-          },
-        )),
-        const SizedBox(width: 14),
-        Expanded(child: _DocUploadTile(
-          label: "ID Back Side *",
-          icon: Icons.badge_outlined,
-          url: _idBackUrl,
-          isLoading: _idBackLoading,
-          color: const Color(0xFF8B5CF6),
-          onTap: () async {
-            setState(() => _idBackLoading = true);
-            final url = await _pickAndUpload('ID Back');
-            if (mounted) setState(() { _idBackUrl = url ?? _idBackUrl; _idBackLoading = false; });
-          },
-        )),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          _DocUploadTile(
+            label: "DL Back Side *",
+            icon: Icons.credit_card_outlined,
+            enabled: _isVerified,
+            url: _dlBackUrl,
+            isLoading: _dlBackLoading,
+            color: _dlBackMissing ? _red : const Color(0xFF0EA5E9),
+            isMissing: _dlBackMissing,
+            onTap: () async {
+              setState(() => _dlBackLoading = true);
+              final url = await _pickAndUpload("Driver's License Back");
+              if (mounted) setState(() {
+                _dlBackUrl     = url ?? _dlBackUrl;
+                _dlBackLoading = false;
+                _dlBackMissing = (_dlBackUrl == null || _dlBackUrl!.isEmpty);
+              });
+            },
+          ),
+          if (_dlBackMissing) ...[
+            const SizedBox(height: 6),
+            const Text('DL back side is required', style: TextStyle(color: _red, fontSize: 11)),
+          ],
+        ])),
       ]),
     ]);
   }
@@ -889,6 +883,7 @@ class _PaymentInfoPageState extends State<PaymentInfoPage>
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       _DarkTextField(
         controller: _bankNameCtrl,
+        enabled: _isVerified,
         label: 'Bank Name *',
         hint: 'e.g. Chase Bank, Wells Fargo',
         validator: (v) => (v ?? '').isEmpty ? 'Required' : null,
@@ -897,23 +892,16 @@ class _PaymentInfoPageState extends State<PaymentInfoPage>
       const SizedBox(height: 16),
       _DarkTextField(
         controller: _accountHolderCtrl,
+        enabled: _isVerified,
         label: 'Account Holder Full Name *',
         hint: 'As it appears on your bank account',
         validator: (v) => (v ?? '').isEmpty ? 'Required' : null,
         onChanged: (_) => setState(() {}),
       ),
       const SizedBox(height: 16),
-      _DarkDropdown<String>(
-        label: 'Account Type *',
-        value: _selectedAccountType,
-        items: _accountTypes,
-        itemLabel: (s) => s,
-        onChanged: (v) => setState(() => _selectedAccountType = v),
-        validator: (v) => v == null ? 'Select account type' : null,
-      ),
-      const SizedBox(height: 16),
       _DarkTextField(
         controller: _routingCtrl,
+        enabled: _isVerified,
         label: 'Routing Number (ABA) *',
         hint: '9-digit routing number',
         keyboardType: TextInputType.number,
@@ -929,6 +917,7 @@ class _PaymentInfoPageState extends State<PaymentInfoPage>
       const SizedBox(height: 16),
       _DarkTextField(
         controller: _accountCtrl,
+        enabled: _isVerified,
         label: 'Bank Account Number *',
         hint: 'Your full account number',
         obscureText: _accountHidden,
@@ -961,6 +950,7 @@ class _PaymentInfoPageState extends State<PaymentInfoPage>
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       _DarkTextField(
         controller: _billingAddressCtrl,
+        enabled: _isVerified,
         label: 'Street Address *',
         hint: '123 Main St, Apt 4B',
         validator: (v) => (v ?? '').isEmpty ? 'Required' : null,
@@ -970,6 +960,7 @@ class _PaymentInfoPageState extends State<PaymentInfoPage>
       Row(children: [
         Expanded(child: _DarkTextField(
           controller: _billingCityCtrl,
+          enabled: _isVerified,
           label: 'City *',
           hint: 'City',
           validator: (v) => (v ?? '').isEmpty ? 'Required' : null,
@@ -978,6 +969,7 @@ class _PaymentInfoPageState extends State<PaymentInfoPage>
         const SizedBox(width: 16),
         Expanded(child: _DarkTextField(
           controller: _billingStateCtrl,
+          enabled: _isVerified,
           label: 'State *',
           hint: 'e.g. California',
           validator: (v) => (v ?? '').isEmpty ? 'Required' : null,
@@ -986,6 +978,7 @@ class _PaymentInfoPageState extends State<PaymentInfoPage>
         const SizedBox(width: 16),
         SizedBox(width: 130, child: _DarkTextField(
           controller: _billingZipCtrl,
+          enabled: _isVerified,
           label: 'ZIP Code *',
           hint: '00000',
           keyboardType: TextInputType.number,
@@ -1031,33 +1024,48 @@ class _PaymentInfoPageState extends State<PaymentInfoPage>
 
   // ── Submit Button ─────────────────────────────────────────────────────────
   Widget _buildSubmitButton() {
+    final bool canSubmit = _isVerified && !_saving;
+
     return SizedBox(
       width: double.infinity,
       child: InkWell(
-        onTap: _saving ? null : _savePaymentInfo,
+        onTap: canSubmit ? _savePaymentInfo : null,
         borderRadius: BorderRadius.circular(16),
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 18),
           decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [Color(0xFF6366F1), Color(0xFF4F46E5)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
+            color: canSubmit ? null : Colors.white.withValues(alpha: 0.05),
+            gradient: canSubmit
+                ? const LinearGradient(
+                    colors: [Color(0xFF6366F1), Color(0xFF4F46E5)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  )
+                : null,
             borderRadius: BorderRadius.circular(16),
-            boxShadow: [
-              BoxShadow(
-                  color: _indigo.withValues(alpha: 0.4),
-                  blurRadius: 20,
-                  offset: const Offset(0, 6))
-            ],
+            boxShadow: canSubmit
+                ? [
+                    BoxShadow(
+                        color: _indigo.withValues(alpha: 0.4),
+                        blurRadius: 20,
+                        offset: const Offset(0, 6))
+                  ]
+                : [],
           ),
           child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            const Icon(Icons.save_alt_rounded, color: Colors.white, size: 20),
+            Icon(
+              _isVerified ? Icons.save_alt_rounded : Icons.lock_rounded, 
+              color: canSubmit ? Colors.white : Colors.white38, 
+              size: 20
+            ),
             const SizedBox(width: 10),
             Text(
               _isComplete ? 'Update Payment Information' : 'Save Payment Information',
-              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16),
+              style: TextStyle(
+                color: canSubmit ? Colors.white : Colors.white38, 
+                fontWeight: FontWeight.w800, 
+                fontSize: 16
+              ),
             ),
           ]),
         ),
@@ -1073,28 +1081,44 @@ class _PaymentInfoPageState extends State<PaymentInfoPage>
 class _SectionCompleteBadge extends StatelessWidget {
   final int index;
   final bool isComplete;
-  const _SectionCompleteBadge({required this.index, required this.isComplete});
+  final bool showError;
+  const _SectionCompleteBadge({
+    required this.index,
+    required this.isComplete,
+    this.showError = false,
+  });
 
   @override
   Widget build(BuildContext context) {
-    if (!isComplete) {
+    if (isComplete) {
+      return Container(
+        width: 24, height: 24,
+        decoration: const BoxDecoration(color: _green, shape: BoxShape.circle),
+        child: const Icon(Icons.check_rounded, color: Colors.white, size: 14),
+      );
+    }
+    if (showError) {
       return Container(
         width: 24, height: 24,
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.06),
+          color: _red.withValues(alpha: 0.15),
           shape: BoxShape.circle,
-          border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+          border: Border.all(color: _red.withValues(alpha: 0.6)),
         ),
-        child: Center(
-          child: Text('${index + 1}',
-              style: const TextStyle(color: Colors.white30, fontSize: 11, fontWeight: FontWeight.w700)),
-        ),
+        child: const Icon(Icons.priority_high_rounded, color: _red, size: 14),
       );
     }
     return Container(
       width: 24, height: 24,
-      decoration: const BoxDecoration(color: _green, shape: BoxShape.circle),
-      child: const Icon(Icons.check_rounded, color: Colors.white, size: 14),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.06),
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+      ),
+      child: Center(
+        child: Text('${index + 1}',
+            style: const TextStyle(color: Colors.white30, fontSize: 11, fontWeight: FontWeight.w700)),
+      ),
     );
   }
 }
@@ -1147,6 +1171,7 @@ class _DarkTextField extends StatelessWidget {
   final String label;
   final String? hint;
   final bool obscureText;
+  final bool enabled;
   final TextInputType? keyboardType;
   final List<TextInputFormatter>? inputFormatters;
   final int? maxLength;
@@ -1159,6 +1184,7 @@ class _DarkTextField extends StatelessWidget {
     required this.label,
     this.hint,
     this.obscureText = false,
+    this.enabled = true,
     this.keyboardType,
     this.inputFormatters,
     this.maxLength,
@@ -1175,23 +1201,28 @@ class _DarkTextField extends StatelessWidget {
       TextFormField(
         controller: controller,
         obscureText: obscureText,
+        enabled: enabled,
         keyboardType: keyboardType,
         inputFormatters: inputFormatters,
         maxLength: maxLength,
         validator: validator,
         onChanged: onChanged,
-        style: const TextStyle(color: _textPri, fontSize: 14),
+        style: TextStyle(color: enabled ? _textPri : Colors.white38, fontSize: 14),
         decoration: InputDecoration(
           hintText: hint,
           hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.2), fontSize: 13),
           counterText: '',
           suffixIcon: suffixIcon,
           filled: true,
-          fillColor: Colors.white.withValues(alpha: 0.04),
+          fillColor: Colors.white.withValues(alpha: enabled ? 0.04 : 0.01),
           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
             borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
+          ),
+          disabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.05)),
           ),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
@@ -1224,6 +1255,7 @@ class _DarkDropdown<T> extends StatelessWidget {
   final String label;
   final T? value;
   final List<T> items;
+  final bool enabled;
   final String Function(T) itemLabel;
   final void Function(T?) onChanged;
   final String? Function(T?)? validator;
@@ -1232,6 +1264,7 @@ class _DarkDropdown<T> extends StatelessWidget {
     required this.label,
     required this.value,
     required this.items,
+    this.enabled = true,
     required this.itemLabel,
     required this.onChanged,
     this.validator,
@@ -1244,17 +1277,21 @@ class _DarkDropdown<T> extends StatelessWidget {
       const SizedBox(height: 8),
       DropdownButtonFormField<T>(
         value: value,
-        onChanged: onChanged,
+        onChanged: enabled ? onChanged : null,
         validator: validator,
-        style: const TextStyle(color: _textPri, fontSize: 14),
+        style: TextStyle(color: enabled ? _textPri : Colors.white38, fontSize: 14),
         dropdownColor: const Color(0xFF1E293B),
         decoration: InputDecoration(
           filled: true,
-          fillColor: Colors.white.withValues(alpha: 0.04),
+          fillColor: Colors.white.withValues(alpha: enabled ? 0.04 : 0.01),
           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
             borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
+          ),
+          disabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.05)),
           ),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
@@ -1276,9 +1313,9 @@ class _DarkDropdown<T> extends StatelessWidget {
         ),
         items: items.map((t) => DropdownMenuItem<T>(
           value: t,
-          child: Text(itemLabel(t), style: const TextStyle(color: _textPri, fontSize: 13)),
+          child: Text(itemLabel(t), style: TextStyle(color: enabled ? _textPri : Colors.white38, fontSize: 13)),
         )).toList(),
-        icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Colors.white38),
+        icon: Icon(Icons.keyboard_arrow_down_rounded, color: enabled ? Colors.white38 : Colors.white12),
       ),
     ]);
   }
@@ -1293,7 +1330,9 @@ class _DocUploadTile extends StatelessWidget {
   final IconData icon;
   final String? url;
   final bool isLoading;
+  final bool enabled;
   final Color color;
+  final bool isMissing;
   final VoidCallback onTap;
 
   const _DocUploadTile({
@@ -1301,56 +1340,81 @@ class _DocUploadTile extends StatelessWidget {
     required this.icon,
     required this.url,
     required this.isLoading,
+    this.enabled = true,
     required this.color,
     required this.onTap,
+    this.isMissing = false,
   });
 
   @override
   Widget build(BuildContext context) {
     final bool hasFile = url != null && url!.isNotEmpty;
 
-    return InkWell(
-      onTap: isLoading ? null : onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 250),
-        padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
-        decoration: BoxDecoration(
-          color: hasFile
-              ? color.withValues(alpha: 0.08)
-              : Colors.white.withValues(alpha: 0.03),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: hasFile
-                ? color.withValues(alpha: 0.4)
-                : Colors.white.withValues(alpha: 0.1),
-            width: hasFile ? 1.5 : 1,
-          ),
-        ),
-        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          if (isLoading)
-            SizedBox(width: 28, height: 28,
-              child: CircularProgressIndicator(strokeWidth: 2.5, color: color))
-          else
-            Icon(hasFile ? Icons.check_circle_rounded : icon,
-                color: hasFile ? color : Colors.white24, size: 28),
-          const SizedBox(height: 10),
-          Text(label,
-              style: TextStyle(
-                color: hasFile ? color : Colors.white38,
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-              ),
-              textAlign: TextAlign.center),
-          const SizedBox(height: 4),
-          Text(
-            hasFile ? 'Tap to replace' : 'Tap to upload',
-            style: TextStyle(
-              color: hasFile ? color.withValues(alpha: 0.6) : Colors.white.withValues(alpha: 0.2),
-              fontSize: 10,
+    return AnimatedOpacity(
+      duration: const Duration(milliseconds: 200),
+      opacity: enabled ? 1.0 : 0.5,
+      child: InkWell(
+        onTap: (!enabled || isLoading) ? null : onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 250),
+          padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+          decoration: BoxDecoration(
+            color: isMissing
+                ? _red.withValues(alpha: 0.06)
+                : hasFile
+                    ? color.withValues(alpha: 0.08)
+                    : Colors.white.withValues(alpha: 0.03),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: isMissing
+                  ? _red.withValues(alpha: 0.5)
+                  : hasFile
+                      ? color.withValues(alpha: 0.4)
+                      : Colors.white.withValues(alpha: 0.1),
+              width: (isMissing || hasFile) ? 1.5 : 1,
             ),
           ),
-        ]),
+          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+            if (isLoading)
+              SizedBox(width: 28, height: 28,
+                child: CircularProgressIndicator(strokeWidth: 2.5, color: color))
+            else
+              Icon(
+                isMissing
+                    ? Icons.error_outline_rounded
+                    : hasFile
+                        ? Icons.check_circle_rounded
+                        : icon,
+                color: isMissing ? _red : hasFile ? color : Colors.white24,
+                size: 28,
+              ),
+            const SizedBox(height: 10),
+            Text(label,
+                style: TextStyle(
+                  color: isMissing ? _red : hasFile ? color : Colors.white38,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+                textAlign: TextAlign.center),
+            const SizedBox(height: 4),
+            Text(
+              isMissing
+                  ? 'Upload required'
+                  : hasFile
+                      ? 'Tap to replace'
+                      : 'Tap to upload',
+              style: TextStyle(
+                color: isMissing
+                    ? _red.withValues(alpha: 0.7)
+                    : hasFile
+                        ? color.withValues(alpha: 0.6)
+                        : Colors.white.withValues(alpha: 0.2),
+                fontSize: 10,
+              ),
+            ),
+          ]),
+        ),
       ),
     );
   }

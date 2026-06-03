@@ -2,7 +2,11 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-import 'user_dashboard.dart';
+// Import the newly split files directly so this page can see the classes and colors
+import 'dashboard_user/opportunity_model.dart';
+import 'dashboard_user/theme_constants.dart';
+import 'dashboard_user/glass_container.dart';
+import 'dashboard_user/app_dialogs.dart';
 
 // ===========================================================================
 // DATATRICKS AI — PROFILE PAGE
@@ -472,6 +476,7 @@ class _VerificationCard extends StatelessWidget {
     );
   }
 }
+
 // ── PROFILE STATUS CHIP (self-contained, no cross-file dependency) ────────────
 
 class _ProfileStatusChip extends StatelessWidget {
