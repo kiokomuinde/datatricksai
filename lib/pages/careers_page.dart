@@ -129,9 +129,12 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
 
   String? _selectedRole;
   String? _selectedSource;
+  String? _selectedCountry;
   String? _selectedState;
   String? _selectedCity;
+  List<String> _states = [];
   List<String> _cities = [];
+  bool _isLoadingStates = false;
   bool _isLoadingCities = false;
   DateTime? _selectedBirthDate;
   String? _birthDateError;
@@ -145,6 +148,10 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
   String?       _suppFileError;
 
   final List<String> _roles = [
+    "AI Chatbot Assistant",
+    "AI Chatbot Conversation Designer",
+    "AI Chatbot Quality Analyst",
+    "AI Chatbot Trainer",
     "AI Data Annotator (Audio)",
     "AI Data Annotator (Image/Video)",
     "AI Data Annotator (Text)",
@@ -155,6 +162,8 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
     "AI Trust & Safety Specialist",
     "Backend Developer (Python/Node.js)",
     "Bias Mitigation Specialist",
+    "Chatbot Response Evaluator",
+    "Chatbot Training Data Specialist",
     "Client Onboarding Specialist",
     "Client Success Manager",
     "Cloud Infrastructure Engineer",
@@ -221,57 +230,138 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
     "Job Fair", "Referral", "Other",
   ];
 
-  final Map<String, List<String>> _usaStates = {
-    "Alabama": ["Birmingham", "Montgomery", "Huntsville", "Mobile"],
-    "Alaska": ["Anchorage", "Fairbanks", "Juneau", "Sitka"],
-    "Arizona": ["Phoenix", "Tucson", "Mesa", "Chandler"],
-    "Arkansas": ["Little Rock", "Fort Smith", "Fayetteville", "Springdale"],
-    "California": ["Los Angeles", "San Francisco", "San Diego", "Sacramento", "San Jose"],
-    "Colorado": ["Denver", "Colorado Springs", "Aurora", "Fort Collins"],
-    "Connecticut": ["Bridgeport", "New Haven", "Stamford", "Hartford"],
-    "Delaware": ["Wilmington", "Dover", "Newark", "Middletown"],
-    "Florida": ["Miami", "Orlando", "Tampa", "Jacksonville"],
-    "Georgia": ["Atlanta", "Augusta", "Columbus", "Savannah"],
-    "Hawaii": ["Honolulu", "Pearl City", "Hilo", "Kailua"],
-    "Idaho": ["Boise", "Meridian", "Nampa", "Idaho Falls"],
-    "Illinois": ["Chicago", "Aurora", "Joliet", "Naperville"],
-    "Indiana": ["Indianapolis", "Fort Wayne", "Evansville", "South Bend"],
-    "Iowa": ["Des Moines", "Cedar Rapids", "Davenport", "Sioux City"],
-    "Kansas": ["Wichita", "Overland Park", "Kansas City", "Olathe"],
-    "Kentucky": ["Louisville", "Lexington", "Bowling Green", "Owensboro"],
-    "Louisiana": ["New Orleans", "Baton Rouge", "Shreveport", "Lafayette"],
-    "Maine": ["Portland", "Lewiston", "Bangor", "South Portland"],
-    "Maryland": ["Baltimore", "Columbia", "Germantown", "Silver Spring"],
-    "Massachusetts": ["Boston", "Worcester", "Springfield", "Cambridge"],
-    "Michigan": ["Detroit", "Grand Rapids", "Warren", "Sterling Heights"],
-    "Minnesota": ["Minneapolis", "St. Paul", "Rochester", "Duluth"],
-    "Mississippi": ["Jackson", "Gulfport", "Southaven", "Hattiesburg"],
-    "Missouri": ["Kansas City", "St. Louis", "Springfield", "Columbia"],
-    "Montana": ["Billings", "Missoula", "Great Falls", "Bozeman"],
-    "Nebraska": ["Omaha", "Lincoln", "Bellevue", "Grand Island"],
-    "Nevada": ["Las Vegas", "Henderson", "Reno", "North Las Vegas"],
-    "New Hampshire": ["Manchester", "Nashua", "Concord", "Derry"],
-    "New Jersey": ["Newark", "Jersey City", "Paterson", "Elizabeth"],
-    "New Mexico": ["Albuquerque", "Las Cruces", "Rio Rancho", "Santa Fe"],
-    "New York": ["New York City", "Buffalo", "Rochester", "Yonkers", "Syracuse"],
-    "North Carolina": ["Charlotte", "Raleigh", "Greensboro", "Durham"],
-    "North Dakota": ["Fargo", "Bismarck", "Grand Forks", "Minot"],
-    "Ohio": ["Columbus", "Cleveland", "Cincinnati", "Toledo"],
-    "Oklahoma": ["Oklahoma City", "Tulsa", "Norman", "Broken Arrow"],
-    "Oregon": ["Portland", "Salem", "Eugene", "Gresham"],
-    "Pennsylvania": ["Philadelphia", "Pittsburgh", "Allentown", "Erie"],
-    "Rhode Island": ["Providence", "Warwick", "Cranston", "Pawtucket"],
-    "South Carolina": ["Charleston", "Columbia", "North Charleston", "Mount Pleasant"],
-    "South Dakota": ["Sioux Falls", "Rapid City", "Aberdeen", "Brookings"],
-    "Tennessee": ["Nashville", "Memphis", "Knoxville", "Chattanooga"],
-    "Texas": ["Houston", "San Antonio", "Dallas", "Austin", "Fort Worth"],
-    "Utah": ["Salt Lake City", "West Valley City", "Provo", "West Jordan"],
-    "Vermont": ["Burlington", "South Burlington", "Rutland", "Barre"],
-    "Virginia": ["Virginia Beach", "Norfolk", "Chesapeake", "Richmond"],
-    "Washington": ["Seattle", "Spokane", "Tacoma", "Vancouver", "Bellevue"],
-    "West Virginia": ["Charleston", "Huntington", "Morgantown", "Parkersburg"],
-    "Wisconsin": ["Milwaukee", "Madison", "Green Bay", "Kenosha"],
-    "Wyoming": ["Cheyenne", "Casper", "Laramie", "Gillette"],
+  // Country -> State/Province/Region -> Cities
+  final Map<String, Map<String, List<String>>> _countryData = {
+    "United States": {
+      "Alabama": ["Birmingham", "Montgomery", "Huntsville", "Mobile"],
+      "Alaska": ["Anchorage", "Fairbanks", "Juneau", "Sitka"],
+      "Arizona": ["Phoenix", "Tucson", "Mesa", "Chandler"],
+      "Arkansas": ["Little Rock", "Fort Smith", "Fayetteville", "Springdale"],
+      "California": ["Los Angeles", "San Francisco", "San Diego", "Sacramento", "San Jose"],
+      "Colorado": ["Denver", "Colorado Springs", "Aurora", "Fort Collins"],
+      "Connecticut": ["Bridgeport", "New Haven", "Stamford", "Hartford"],
+      "Delaware": ["Wilmington", "Dover", "Newark", "Middletown"],
+      "Florida": ["Miami", "Orlando", "Tampa", "Jacksonville"],
+      "Georgia": ["Atlanta", "Augusta", "Columbus", "Savannah"],
+      "Hawaii": ["Honolulu", "Pearl City", "Hilo", "Kailua"],
+      "Idaho": ["Boise", "Meridian", "Nampa", "Idaho Falls"],
+      "Illinois": ["Chicago", "Aurora", "Joliet", "Naperville"],
+      "Indiana": ["Indianapolis", "Fort Wayne", "Evansville", "South Bend"],
+      "Iowa": ["Des Moines", "Cedar Rapids", "Davenport", "Sioux City"],
+      "Kansas": ["Wichita", "Overland Park", "Kansas City", "Olathe"],
+      "Kentucky": ["Louisville", "Lexington", "Bowling Green", "Owensboro"],
+      "Louisiana": ["New Orleans", "Baton Rouge", "Shreveport", "Lafayette"],
+      "Maine": ["Portland", "Lewiston", "Bangor", "South Portland"],
+      "Maryland": ["Baltimore", "Columbia", "Germantown", "Silver Spring"],
+      "Massachusetts": ["Boston", "Worcester", "Springfield", "Cambridge"],
+      "Michigan": ["Detroit", "Grand Rapids", "Warren", "Sterling Heights"],
+      "Minnesota": ["Minneapolis", "St. Paul", "Rochester", "Duluth"],
+      "Mississippi": ["Jackson", "Gulfport", "Southaven", "Hattiesburg"],
+      "Missouri": ["Kansas City", "St. Louis", "Springfield", "Columbia"],
+      "Montana": ["Billings", "Missoula", "Great Falls", "Bozeman"],
+      "Nebraska": ["Omaha", "Lincoln", "Bellevue", "Grand Island"],
+      "Nevada": ["Las Vegas", "Henderson", "Reno", "North Las Vegas"],
+      "New Hampshire": ["Manchester", "Nashua", "Concord", "Derry"],
+      "New Jersey": ["Newark", "Jersey City", "Paterson", "Elizabeth"],
+      "New Mexico": ["Albuquerque", "Las Cruces", "Rio Rancho", "Santa Fe"],
+      "New York": ["New York City", "Buffalo", "Rochester", "Yonkers", "Syracuse"],
+      "North Carolina": ["Charlotte", "Raleigh", "Greensboro", "Durham"],
+      "North Dakota": ["Fargo", "Bismarck", "Grand Forks", "Minot"],
+      "Ohio": ["Columbus", "Cleveland", "Cincinnati", "Toledo"],
+      "Oklahoma": ["Oklahoma City", "Tulsa", "Norman", "Broken Arrow"],
+      "Oregon": ["Portland", "Salem", "Eugene", "Gresham"],
+      "Pennsylvania": ["Philadelphia", "Pittsburgh", "Allentown", "Erie"],
+      "Rhode Island": ["Providence", "Warwick", "Cranston", "Pawtucket"],
+      "South Carolina": ["Charleston", "Columbia", "North Charleston", "Mount Pleasant"],
+      "South Dakota": ["Sioux Falls", "Rapid City", "Aberdeen", "Brookings"],
+      "Tennessee": ["Nashville", "Memphis", "Knoxville", "Chattanooga"],
+      "Texas": ["Houston", "San Antonio", "Dallas", "Austin", "Fort Worth"],
+      "Utah": ["Salt Lake City", "West Valley City", "Provo", "West Jordan"],
+      "Vermont": ["Burlington", "South Burlington", "Rutland", "Barre"],
+      "Virginia": ["Virginia Beach", "Norfolk", "Chesapeake", "Richmond"],
+      "Washington": ["Seattle", "Spokane", "Tacoma", "Vancouver", "Bellevue"],
+      "West Virginia": ["Charleston", "Huntington", "Morgantown", "Parkersburg"],
+      "Wisconsin": ["Milwaukee", "Madison", "Green Bay", "Kenosha"],
+      "Wyoming": ["Cheyenne", "Casper", "Laramie", "Gillette"],
+    },
+    "India": {
+      "Andhra Pradesh": ["Visakhapatnam", "Vijayawada", "Guntur", "Tirupati"],
+      "Arunachal Pradesh": ["Itanagar", "Naharlagun", "Pasighat", "Tawang"],
+      "Assam": ["Guwahati", "Silchar", "Dibrugarh", "Jorhat"],
+      "Bihar": ["Patna", "Gaya", "Bhagalpur", "Muzaffarpur"],
+      "Chhattisgarh": ["Raipur", "Bhilai", "Bilaspur", "Durg"],
+      "Goa": ["Panaji", "Margao", "Vasco da Gama", "Mapusa"],
+      "Gujarat": ["Ahmedabad", "Surat", "Vadodara", "Rajkot"],
+      "Haryana": ["Gurugram", "Faridabad", "Panipat", "Ambala"],
+      "Himachal Pradesh": ["Shimla", "Manali", "Dharamshala", "Solan"],
+      "Jharkhand": ["Ranchi", "Jamshedpur", "Dhanbad", "Bokaro"],
+      "Karnataka": ["Bengaluru", "Mysuru", "Mangaluru", "Hubballi"],
+      "Kerala": ["Kochi", "Thiruvananthapuram", "Kozhikode", "Kollam"],
+      "Madhya Pradesh": ["Indore", "Bhopal", "Jabalpur", "Gwalior"],
+      "Maharashtra": ["Mumbai", "Pune", "Nagpur", "Nashik"],
+      "Manipur": ["Imphal", "Thoubal", "Bishnupur", "Churachandpur"],
+      "Meghalaya": ["Shillong", "Tura", "Jowai", "Nongstoin"],
+      "Mizoram": ["Aizawl", "Lunglei", "Champhai", "Serchhip"],
+      "Nagaland": ["Kohima", "Dimapur", "Mokokchung", "Tuensang"],
+      "Odisha": ["Bhubaneswar", "Cuttack", "Rourkela", "Berhampur"],
+      "Punjab": ["Ludhiana", "Amritsar", "Jalandhar", "Patiala"],
+      "Rajasthan": ["Jaipur", "Jodhpur", "Udaipur", "Kota"],
+      "Sikkim": ["Gangtok", "Namchi", "Gyalshing", "Mangan"],
+      "Tamil Nadu": ["Chennai", "Coimbatore", "Madurai", "Tiruchirappalli"],
+      "Telangana": ["Hyderabad", "Warangal", "Nizamabad", "Karimnagar"],
+      "Tripura": ["Agartala", "Udaipur", "Dharmanagar", "Kailashahar"],
+      "Uttar Pradesh": ["Lucknow", "Kanpur", "Noida", "Varanasi", "Agra"],
+      "Uttarakhand": ["Dehradun", "Haridwar", "Nainital", "Rishikesh"],
+      "West Bengal": ["Kolkata", "Howrah", "Durgapur", "Siliguri"],
+      "Andaman and Nicobar Islands": ["Port Blair"],
+      "Chandigarh": ["Chandigarh"],
+      "Dadra and Nagar Haveli and Daman and Diu": ["Silvassa", "Daman"],
+      "Delhi": ["New Delhi", "Dwarka", "Rohini", "Karol Bagh"],
+      "Jammu and Kashmir": ["Srinagar", "Jammu", "Anantnag"],
+      "Ladakh": ["Leh", "Kargil"],
+      "Lakshadweep": ["Kavaratti"],
+      "Puducherry": ["Puducherry", "Karaikal"],
+    },
+    "Canada": {
+      "Alberta": ["Calgary", "Edmonton", "Red Deer", "Lethbridge"],
+      "British Columbia": ["Vancouver", "Victoria", "Surrey", "Kelowna"],
+      "Manitoba": ["Winnipeg", "Brandon", "Steinbach", "Winkler"],
+      "New Brunswick": ["Moncton", "Saint John", "Fredericton", "Dieppe"],
+      "Newfoundland and Labrador": ["St. John's", "Mount Pearl", "Corner Brook"],
+      "Northwest Territories": ["Yellowknife", "Hay River", "Inuvik"],
+      "Nova Scotia": ["Halifax", "Dartmouth", "Sydney", "Truro"],
+      "Nunavut": ["Iqaluit", "Rankin Inlet", "Arviat"],
+      "Ontario": ["Toronto", "Ottawa", "Mississauga", "Hamilton", "London"],
+      "Prince Edward Island": ["Charlottetown", "Summerside"],
+      "Quebec": ["Montreal", "Quebec City", "Laval", "Gatineau"],
+      "Saskatchewan": ["Saskatoon", "Regina", "Prince Albert", "Moose Jaw"],
+      "Yukon": ["Whitehorse", "Dawson City"],
+    },
+    "United Kingdom": {
+      "England": ["London", "Manchester", "Birmingham", "Liverpool", "Leeds"],
+      "Scotland": ["Edinburgh", "Glasgow", "Aberdeen", "Dundee"],
+      "Wales": ["Cardiff", "Swansea", "Newport", "Wrexham"],
+      "Northern Ireland": ["Belfast", "Derry", "Lisburn", "Newry"],
+    },
+    "Philippines": {
+      "National Capital Region (NCR)": ["Manila", "Quezon City", "Makati", "Pasig"],
+      "Cordillera Administrative Region (CAR)": ["Baguio", "Tabuk", "La Trinidad"],
+      "Ilocos Region (Region I)": ["Laoag", "Vigan", "San Fernando"],
+      "Cagayan Valley (Region II)": ["Tuguegarao", "Ilagan", "Cauayan"],
+      "Central Luzon (Region III)": ["Angeles", "San Fernando", "Malolos", "Olongapo"],
+      "Calabarzon (Region IV-A)": ["Antipolo", "Batangas City", "Lucena", "Calamba"],
+      "Mimaropa (Region IV-B)": ["Puerto Princesa", "Calapan", "Odiongan"],
+      "Bicol Region (Region V)": ["Legazpi", "Naga", "Sorsogon"],
+      "Western Visayas (Region VI)": ["Iloilo City", "Bacolod", "Roxas"],
+      "Central Visayas (Region VII)": ["Cebu City", "Mandaue", "Tagbilaran"],
+      "Eastern Visayas (Region VIII)": ["Tacloban", "Ormoc", "Calbayog"],
+      "Zamboanga Peninsula (Region IX)": ["Zamboanga City", "Pagadian", "Dipolog"],
+      "Northern Mindanao (Region X)": ["Cagayan de Oro", "Iligan", "Malaybalay"],
+      "Davao Region (Region XI)": ["Davao City", "Tagum", "Panabo"],
+      "Soccsksargen (Region XII)": ["Koronadal", "General Santos", "Kidapawan"],
+      "Caraga (Region XIII)": ["Butuan", "Surigao", "Bislig"],
+      "Bangsamoro (BARMM)": ["Cotabato City", "Marawi", "Jolo"],
+    },
   };
 
   String _formatDate(DateTime d) {
@@ -285,8 +375,27 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
     Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
   }
 
+  void _onCountryChanged(String? newCountry) {
+    if (newCountry == null) return;
+    setState(() {
+      _selectedCountry = newCountry;
+      _selectedState = null;
+      _selectedCity = null;
+      _cities = [];
+      _isLoadingStates = true;
+    });
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (mounted) {
+        setState(() {
+          _states = _countryData[newCountry]?.keys.toList() ?? [];
+          _isLoadingStates = false;
+        });
+      }
+    });
+  }
+
   void _onStateChanged(String? newState) {
-    if (newState == null) return;
+    if (newState == null || _selectedCountry == null) return;
     setState(() {
       _selectedState = newState;
       _selectedCity = null; 
@@ -295,7 +404,7 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
     Future.delayed(const Duration(milliseconds: 500), () {
       if (mounted) {
         setState(() {
-          _cities = _usaStates[newState] ?? [];
+          _cities = _countryData[_selectedCountry]?[newState] ?? [];
           _isLoadingCities = false;
         });
       }
@@ -415,6 +524,7 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
             'lastName':      _lastNameController.text.trim(),
             'email':         _emailController.text.trim(),
             'phone':         "+1 ${_phoneController.text.trim()}",
+            'country':       _selectedCountry,
             'state':         _selectedState,
             'city':          _selectedCity,
             'zip':           _zipController.text.trim(),
@@ -453,6 +563,20 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
 
   @override
   Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isMobile  = screenWidth < 600;
+    final isTablet  = screenWidth >= 600 && screenWidth < 1000;
+
+    final double maxContentWidth = screenWidth >= 1200
+        ? 960
+        : screenWidth >= 900
+            ? 800
+            : double.infinity;
+    final double horizontalPadding = isMobile ? 16 : (isTablet ? 24 : 40);
+    final double verticalPadding   = isMobile ? 24 : 40;
+    final double titleFontSize     = isMobile ? 30 : (isTablet ? 36 : 42);
+    final double subtitleFontSize  = isMobile ? 15 : 18;
+
     return Scaffold(
       backgroundColor: const Color(0xFF020408),
       body: Stack(
@@ -464,38 +588,36 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
               Expanded(
                 child: SingleChildScrollView(
                   controller: _scrollController,
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 40),
+                  padding: EdgeInsets.symmetric(horizontal: horizontalPadding, vertical: verticalPadding),
                   child: Center(
                     child: Container(
-                      constraints: const BoxConstraints(maxWidth: 800),
+                      constraints: BoxConstraints(maxWidth: maxContentWidth),
                       child: Form(
                         key: _formKey,
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text(
+                            Text(
                               "Join the Hive",
-                              style: TextStyle(fontSize: 42, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: -1),
+                              style: TextStyle(fontSize: titleFontSize, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: -1),
                             ),
                             const SizedBox(height: 10),
-                            const Text(
+                            Text(
                               "Help us build the next generation of AI models.",
-                              style: TextStyle(fontSize: 18, color: Colors.white54, height: 1.5),
+                              style: TextStyle(fontSize: subtitleFontSize, color: Colors.white54, height: 1.5),
                             ),
                             const SizedBox(height: 40),
 
                             _SectionHeader("Personal Information"),
                             const SizedBox(height: 20),
-                            Row(children: [
-                              Expanded(child: _NeonInput(label: "First Name", controller: _firstNameController)),
-                              const SizedBox(width: 20),
-                              Expanded(child: _NeonInput(label: "Last Name", controller: _lastNameController)),
+                            _ResponsiveFieldRow(children: [
+                              _NeonInput(label: "First Name", controller: _firstNameController),
+                              _NeonInput(label: "Last Name", controller: _lastNameController),
                             ]),
                             const SizedBox(height: 20),
-                            Row(children: [
-                              Expanded(child: _NeonInput(label: "Email", icon: Icons.email, controller: _emailController, isEmail: true)),
-                              const SizedBox(width: 20),
-                              Expanded(child: _NeonInput(label: "Phone", icon: Icons.phone, controller: _phoneController, isPhone: true)),
+                            _ResponsiveFieldRow(children: [
+                              _NeonInput(label: "Email", icon: Icons.email, controller: _emailController, isEmail: true),
+                              _NeonInput(label: "Phone", icon: Icons.phone, controller: _phoneController, isPhone: true),
                             ]),
                             const SizedBox(height: 20),
                             // Date of Birth picker
@@ -549,17 +671,20 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
 
                             _SectionHeader("Location"),
                             const SizedBox(height: 20),
-                            Row(children: [
-                              Expanded(child: _NeonDropdown(label: "State / Region", value: _selectedState, items: _usaStates.keys.toList(), onChanged: _onStateChanged)),
-                              const SizedBox(width: 20),
-                              Expanded(
-                                child: _isLoadingCities
-                                    ? const Center(child: CircularProgressIndicator())
+                            _ResponsiveFieldRow(
+                              breakpoint: 750,
+                              children: [
+                                _NeonDropdown(label: "Country", value: _selectedCountry, items: _countryData.keys.toList(), onChanged: _onCountryChanged),
+                                _isLoadingStates
+                                    ? const SizedBox(height: 58, child: Center(child: SizedBox(height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2))))
+                                    : _NeonDropdown(label: "State / Region", value: _selectedState, items: _states, onChanged: _onStateChanged),
+                                _isLoadingCities
+                                    ? const SizedBox(height: 58, child: Center(child: SizedBox(height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2))))
                                     : _NeonDropdown(label: "City", value: _selectedCity, items: _cities, onChanged: (val) => setState(() => _selectedCity = val)),
-                              ),
-                              const SizedBox(width: 20),
-                              Expanded(child: _NeonInput(label: "Zip Code", controller: _zipController, isZip: true)),
-                            ]),
+                              ],
+                            ),
+                            const SizedBox(height: 20),
+                            _NeonInput(label: "Zip / Postal Code", controller: _zipController, isZip: true),
                             const SizedBox(height: 40),
 
                             _SectionHeader("Education"),
@@ -866,9 +991,10 @@ class _WaitingPageState extends State<WaitingPage> {
         'email':       widget.formData['email'],
         'phone':       widget.formData['phone'],
         'location': {
-          'state': widget.formData['state'],
-          'city':  widget.formData['city'],
-          'zip':   widget.formData['zip'],
+          'country': widget.formData['country'],
+          'state':   widget.formData['state'],
+          'city':    widget.formData['city'],
+          'zip':     widget.formData['zip'],
         },
         'highSchool':  widget.formData['highSchool'], 
         'role':        widget.formData['role'],
@@ -971,7 +1097,9 @@ class _WaitingPageState extends State<WaitingPage> {
         children: [
           const _BackgroundCanvas(),
           Center(
-            child: Column(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 const SizedBox(
@@ -1002,6 +1130,7 @@ class _WaitingPageState extends State<WaitingPage> {
                   style: TextStyle(fontSize: 13, color: Colors.white38),
                 ),
               ],
+            ),
             ),
           ),
         ],
@@ -1282,45 +1411,124 @@ class _Navbar extends StatelessWidget {
     return ClipRRect(
       child: BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10), 
-        child: Container(
-          height: 80, 
-          padding: const EdgeInsets.symmetric(horizontal: 40), 
-          decoration: BoxDecoration(
-            border: Border(bottom: BorderSide(color: Colors.white.withOpacity(0.05))), 
-            color: Colors.black.withOpacity(0.2),
-          ), 
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween, 
-            children: [
-              InkWell(
-                onTap: onHomeTap, 
-                child: Row(
-                  children: [
-                    Image.asset('assets/images/logo.png', height: 40, errorBuilder: (c, e, s) => const Icon(Icons.rocket, color: Colors.white)), 
-                    const SizedBox(width: 15), 
-                    const Text("DATATRICKS AI", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20)),
-                  ],
-                ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final width = constraints.maxWidth;
+            final isMobile = width < 600;
+            final isNarrow = width < 420;
+            final horizontalPadding = isMobile ? 16.0 : 40.0;
+
+            return Container(
+              height: 70,
+              padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
+              decoration: BoxDecoration(
+                border: Border(bottom: BorderSide(color: Colors.white.withOpacity(0.05))), 
+                color: Colors.black.withOpacity(0.2),
               ), 
-              Row(
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween, 
                 children: [
-                  TextButton.icon(
-                    onPressed: () => _showShareOptions(context), 
-                    icon: const Icon(Icons.share, color: Colors.white54, size: 18), 
-                    label: const Text("Share", style: TextStyle(color: Colors.white54)),
-                  ),
-                  const SizedBox(width: 20),
-                  TextButton.icon(
-                    onPressed: onHomeTap, 
-                    icon: const Icon(Icons.arrow_back, color: Colors.white54, size: 18), 
-                    label: const Text("Return Home", style: TextStyle(color: Colors.white54)),
+                  Flexible(
+                    child: InkWell(
+                      onTap: onHomeTap, 
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Image.asset('assets/images/logo.png', height: isMobile ? 32 : 40, errorBuilder: (c, e, s) => const Icon(Icons.rocket, color: Colors.white)), 
+                          const SizedBox(width: 12), 
+                          if (!isNarrow)
+                            Flexible(
+                              child: Text(
+                                "DATATRICKS AI",
+                                overflow: TextOverflow.ellipsis,
+                                maxLines: 1,
+                                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: isMobile ? 15 : 20),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ), 
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      isMobile
+                          ? IconButton(
+                              onPressed: () => _showShareOptions(context),
+                              icon: const Icon(Icons.share, color: Colors.white54, size: 20),
+                              tooltip: "Share",
+                            )
+                          : TextButton.icon(
+                              onPressed: () => _showShareOptions(context), 
+                              icon: const Icon(Icons.share, color: Colors.white54, size: 18), 
+                              label: const Text("Share", style: TextStyle(color: Colors.white54)),
+                            ),
+                      SizedBox(width: isMobile ? 4 : 20),
+                      isMobile
+                          ? IconButton(
+                              onPressed: onHomeTap,
+                              icon: const Icon(Icons.arrow_back, color: Colors.white54, size: 20),
+                              tooltip: "Return Home",
+                            )
+                          : TextButton.icon(
+                              onPressed: onHomeTap, 
+                              icon: const Icon(Icons.arrow_back, color: Colors.white54, size: 18), 
+                              label: const Text("Return Home", style: TextStyle(color: Colors.white54)),
+                            ),
+                    ],
                   ),
                 ],
               ),
-            ],
-          ),
+            );
+          },
         ),
       ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// RESPONSIVE FIELD ROW — lays fields side-by-side on wide screens and
+// stacks them vertically on narrow/mobile screens, avoiding RenderFlex
+// overflow when field content (e.g. long state/region names) gets tight.
+// ---------------------------------------------------------------------------
+class _ResponsiveFieldRow extends StatelessWidget {
+  final List<Widget> children;
+  final double spacing;
+  final double breakpoint;
+
+  const _ResponsiveFieldRow({
+    required this.children,
+    this.spacing = 20,
+    this.breakpoint = 700,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isNarrow = constraints.maxWidth < breakpoint;
+        if (isNarrow) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (int i = 0; i < children.length; i++) ...[
+                children[i],
+                if (i != children.length - 1) SizedBox(height: spacing),
+              ],
+            ],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (int i = 0; i < children.length; i++) ...[
+              Expanded(child: children[i]),
+              if (i != children.length - 1) SizedBox(width: spacing),
+            ],
+          ],
+        );
+      },
     );
   }
 }
@@ -1390,7 +1598,28 @@ class _NeonDropdown extends StatelessWidget {
   Widget build(BuildContext context) {
     return DropdownButtonFormField<String>(
       value: value, 
-      items: items.map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(), 
+      isExpanded: true,
+      items: items
+          .map((e) => DropdownMenuItem(
+                value: e,
+                child: Text(
+                  e,
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                ),
+              ))
+          .toList(), 
+      selectedItemBuilder: (context) => items
+          .map((e) => Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  e,
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                  style: const TextStyle(color: Colors.white),
+                ),
+              ))
+          .toList(),
       onChanged: onChanged, 
       dropdownColor: const Color(0xFF1E293B), 
       style: const TextStyle(color: Colors.white),
