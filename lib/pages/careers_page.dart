@@ -125,6 +125,7 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
   final _linkedinController       = TextEditingController();
   final _otherSourceController    = TextEditingController();
   final _highSchoolController     = TextEditingController();
+  final _universityController     = TextEditingController();
   final _referralEmailController  = TextEditingController();
 
   String? _selectedRole;
@@ -229,6 +230,17 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
     "Facebook", "Instagram", "Twitter / X", "University / Campus",
     "Job Fair", "Referral", "Other",
   ];
+
+  // Country -> international dialing code, used to set the phone field's
+  // prefix dynamically (was hardcoded to "+1", which was wrong for anyone
+  // outside the US/Canada — see tester feedback).
+  final Map<String, String> _countryCallingCodes = {
+    "United States":  "+1",
+    "Canada":         "+1",
+    "United Kingdom": "+44",
+    "India":          "+91",
+    "Philippines":    "+63",
+  };
 
   // Country -> State/Province/Region -> Cities
   final Map<String, Map<String, List<String>>> _countryData = {
@@ -523,12 +535,13 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
             'firstName':     _firstNameController.text.trim(),
             'lastName':      _lastNameController.text.trim(),
             'email':         _emailController.text.trim(),
-            'phone':         "+1 ${_phoneController.text.trim()}",
+            'phone':         "${_countryCallingCodes[_selectedCountry] ?? '+1'} ${_phoneController.text.trim()}",
             'country':       _selectedCountry,
             'state':         _selectedState,
             'city':          _selectedCity,
             'zip':           _zipController.text.trim(),
             'highSchool':    _highSchoolController.text.trim(),
+            'university':    _universityController.text.trim(),
             'role':          _selectedRole,
             'linkedin':      _linkedinController.text.trim(),
             'source':        finalSource,
@@ -557,6 +570,7 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
     _linkedinController.dispose();
     _otherSourceController.dispose();
     _highSchoolController.dispose();
+    _universityController.dispose();
     _referralEmailController.dispose();
     super.dispose();
   }
@@ -617,7 +631,13 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
                             const SizedBox(height: 20),
                             _ResponsiveFieldRow(children: [
                               _NeonInput(label: "Email", icon: Icons.email, controller: _emailController, isEmail: true),
-                              _NeonInput(label: "Phone", icon: Icons.phone, controller: _phoneController, isPhone: true),
+                              _NeonInput(
+                                label: "Phone",
+                                icon: Icons.phone,
+                                controller: _phoneController,
+                                isPhone: true,
+                                phonePrefix: _countryCallingCodes[_selectedCountry] ?? "+1",
+                              ),
                             ]),
                             const SizedBox(height: 20),
                             // Date of Birth picker
@@ -642,17 +662,26 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
                                       const Icon(Icons.cake_outlined, color: Color(0xFF6366F1), size: 20),
                                       const SizedBox(width: 12),
                                       Expanded(
-                                        child: Text(
-                                          _selectedBirthDate == null
-                                              ? 'Date of Birth'
-                                              : _formatDate(_selectedBirthDate!),
-                                          style: TextStyle(
-                                            color: _selectedBirthDate == null
-                                                ? (_birthDateError != null ? Colors.redAccent : Colors.white38)
-                                                : Colors.white,
-                                            fontSize: 16,
-                                          ),
-                                        ),
+                                        child: _selectedBirthDate == null
+                                            ? RichText(
+                                                text: TextSpan(
+                                                  text: 'Date of Birth',
+                                                  style: TextStyle(
+                                                    color: _birthDateError != null ? Colors.redAccent : Colors.white38,
+                                                    fontSize: 16,
+                                                  ),
+                                                  children: const [
+                                                    TextSpan(
+                                                      text: ' *',
+                                                      style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold),
+                                                    ),
+                                                  ],
+                                                ),
+                                              )
+                                            : Text(
+                                                _formatDate(_selectedBirthDate!),
+                                                style: const TextStyle(color: Colors.white, fontSize: 16),
+                                              ),
                                       ),
                                       const Icon(Icons.calendar_today, color: Colors.white38, size: 18),
                                     ],
@@ -684,19 +713,21 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
                               ],
                             ),
                             const SizedBox(height: 20),
-                            _NeonInput(label: "Zip / Postal Code", controller: _zipController, isZip: true),
+                            _NeonInput(label: "Zip / Postal Code", controller: _zipController, isZip: true, country: _selectedCountry),
                             const SizedBox(height: 40),
 
                             _SectionHeader("Education"),
                             const SizedBox(height: 20),
                             _NeonInput(label: "High School Name", controller: _highSchoolController, icon: Icons.school),
+                            const SizedBox(height: 20),
+                            _NeonInput(label: "University Name", controller: _universityController, icon: Icons.account_balance),
                             const SizedBox(height: 40),
 
                             _SectionHeader("Role & Experience"),
                             const SizedBox(height: 20),
                             _NeonDropdown(label: "Position Applying For", value: _selectedRole, items: _roles, onChanged: (val) => setState(() => _selectedRole = val)),
                             const SizedBox(height: 20),
-                            _NeonInput(label: "LinkedIn Profile URL (Optional)", icon: Icons.link, controller: _linkedinController, isOptional: true),
+                            _NeonInput(label: "LinkedIn Profile URL", icon: Icons.link, controller: _linkedinController),
                             const SizedBox(height: 20),
                             _NeonDropdown(
                               label: "How did you hear about us? (Optional)", 
@@ -733,8 +764,7 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
                                             return null;
                                           },
                                           decoration: InputDecoration(
-                                            labelText: "Referrer's DataTricks Account Email",
-                                            labelStyle: const TextStyle(color: Colors.white38),
+                                            label: _buildFieldLabel("Referrer's DataTricks Account Email", false),
                                             hintText: "e.g. colleague@example.com",
                                             hintStyle: TextStyle(color: Colors.white.withOpacity(0.18), fontSize: 13),
                                             filled: true,
@@ -786,7 +816,7 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
                             ),
                             const SizedBox(height: 40),
 
-                            _SectionHeader("Resume / CV"),
+                            _SectionHeader("Resume / CV", required: true),
                             const SizedBox(height: 15),
                             InkWell(
                               onTap: _pickResume,
@@ -825,7 +855,7 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
                             ),
                             const SizedBox(height: 40),
 
-                            _SectionHeader("Supporting Documents (Transcripts)"),
+                            _SectionHeader("Supporting Documents (Transcripts)", required: true),
                             const SizedBox(height: 15),
                             InkWell(
                               onTap: _pickSuppFile,
@@ -883,11 +913,24 @@ class _CareersPageState extends State<CareersPage> with TickerProviderStateMixin
     );
   }
 
-  Widget _SectionHeader(String title) {
+  Widget _SectionHeader(String title, {bool required = false}) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(title, style: const TextStyle(color: Color(0xFF6366F1), fontWeight: FontWeight.bold, letterSpacing: 1.2)),
+        RichText(
+          text: TextSpan(
+            text: title,
+            style: const TextStyle(color: Color(0xFF6366F1), fontWeight: FontWeight.bold, letterSpacing: 1.2),
+            children: required
+                ? const [
+                    TextSpan(
+                      text: ' *',
+                      style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold),
+                    ),
+                  ]
+                : null,
+          ),
+        ),
         const SizedBox(height: 5),
         Divider(color: Colors.white.withOpacity(0.1)),
       ],
@@ -997,6 +1040,7 @@ class _WaitingPageState extends State<WaitingPage> {
           'zip':     widget.formData['zip'],
         },
         'highSchool':  widget.formData['highSchool'], 
+        'university':  widget.formData['university'],
         'role':        widget.formData['role'],
         'linkedin':    widget.formData['linkedin'],
         'source':      widget.formData['source'],
@@ -1533,11 +1577,35 @@ class _ResponsiveFieldRow extends StatelessWidget {
   }
 }
 
+// ---------------------------------------------------------------------------
+// REQUIRED-FIELD LABEL — small shared helper used by both _NeonInput and
+// _NeonDropdown so every required field shows a consistent red asterisk
+// after its label. Optional fields (isOptional: true) are left as-is.
+// ---------------------------------------------------------------------------
+Widget _buildFieldLabel(String label, bool isOptional) {
+  return RichText(
+    text: TextSpan(
+      text: label,
+      style: const TextStyle(color: Colors.white38, fontSize: 16),
+      children: isOptional
+          ? null
+          : const [
+              TextSpan(
+                text: ' *',
+                style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold),
+              ),
+            ],
+    ),
+  );
+}
+
 class _NeonInput extends StatelessWidget {
   final String label;
   final IconData? icon;
   final TextEditingController controller;
   final bool isEmail, isPhone, isZip, isOptional;
+  final String? country;
+  final String phonePrefix;
 
   const _NeonInput({
     required this.label, 
@@ -1547,28 +1615,56 @@ class _NeonInput extends StatelessWidget {
     this.isPhone = false, 
     this.isZip = false, 
     this.isOptional = false,
+    this.country,
+    this.phonePrefix = "+1",
   });
+
+  // United States is the only country in `_countryData` with a rigid
+  // 5-digit ZIP format. Everyone else (UK postcodes like "SW1A 1AA",
+  // Canadian postal codes like "K1A 0B1", Indian/Philippine PIN codes,
+  // etc.) uses letters, digits, and spaces in varying lengths — so only
+  // enforce the strict US pattern when the US is actually selected.
+  bool get _isUsZip => country == null || country == "United States";
 
   @override
   Widget build(BuildContext context) {
     return TextFormField(
       controller: controller,
       style: const TextStyle(color: Colors.white),
-      keyboardType: isEmail ? TextInputType.emailAddress : (isPhone || isZip ? TextInputType.number : TextInputType.text),
+      keyboardType: isEmail
+          ? TextInputType.emailAddress
+          : isPhone
+              ? TextInputType.phone
+              : (isZip && _isUsZip)
+                  ? TextInputType.number
+                  : TextInputType.text,
       validator: (val) {
         if (isOptional && (val == null || val.trim().isEmpty)) return null;
         if (val == null || val.trim().isEmpty) return "$label is required";
         if (isEmail && !RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(val)) return "Invalid email";
-        if (isPhone && !RegExp(r'^\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}$').hasMatch(val)) return "Invalid US phone";
-        if (isZip && !RegExp(r'^\d{5}(-\d{4})?$').hasMatch(val)) return "Invalid Zip";
+        if (isPhone) {
+          // Country-agnostic check: strip everything but digits and require
+          // a plausible international length (7–15 digits per ITU E.164),
+          // rather than forcing the US 10-digit "(555) 555-5555" shape on
+          // every country in the dropdown.
+          final digitsOnly = val.replaceAll(RegExp(r'\D'), '');
+          if (digitsOnly.length < 7 || digitsOnly.length > 15) return "Invalid phone number";
+        }
+        if (isZip) {
+          if (_isUsZip) {
+            if (!RegExp(r'^\d{5}(-\d{4})?$').hasMatch(val)) return "Invalid Zip";
+          } else {
+            // International postal codes: letters, digits, spaces, hyphens.
+            if (!RegExp(r'^[A-Za-z0-9\s-]{2,10}$').hasMatch(val.trim())) return "Invalid postal code";
+          }
+        }
         return null;
       },
       decoration: InputDecoration(
-        labelText: label, 
-        labelStyle: const TextStyle(color: Colors.white38),
+        label: _buildFieldLabel(label, isOptional),
         filled: true, 
         fillColor: Colors.white.withOpacity(0.05),
-        prefixText: isPhone ? "+1 " : null,
+        prefixText: isPhone ? "$phonePrefix " : null,
         prefixStyle: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
         prefixIcon: icon != null ? Icon(icon, color: Colors.white24, size: 18) : null, 
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none), 
@@ -1628,8 +1724,7 @@ class _NeonDropdown extends StatelessWidget {
         return val == null ? "Please select an option" : null;
       },
       decoration: InputDecoration(
-        labelText: label, 
-        labelStyle: const TextStyle(color: Colors.white38), 
+        label: _buildFieldLabel(label, isOptional), 
         filled: true, 
         fillColor: Colors.white.withOpacity(0.05), 
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none), 
